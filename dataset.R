@@ -204,11 +204,10 @@ district_results_2025 <- district_results_raw %>%
       "BSW" = "bsw"
     )),
     wkr = Gebietsnummer %>% as.numeric()
-  ) %>% select(-c(`1`, `2`, Gebietsnummer, Gruppenname)) %>%
-  group_by(wkr) %>%
-  mutate(winner = resp_E == max(resp_E, na.rm = T)) %>% 
-  select(wkr, party, resp_E, resp_Z, winner) %>% 
-  mutate(election = 2025)
+  ) %>% select(-c(`1`, `2`, Gebietsnummer, Gruppenname)) %>% 
+  mutate(election = 2025) %>% 
+  select(wkr, party, resp_E, resp_Z, election)
+
 
 # Now: Left join to update the candidate dataset
 btw_candidates_updated <- btw_candidates_1983_2025 %>%
@@ -218,10 +217,11 @@ btw_candidates_updated <- btw_candidates_1983_2025 %>%
   ) %>%
   mutate(
     resp_E = coalesce(resp_E.x, resp_E.y),
-    resp_Z = coalesce(resp_Z.x, resp_Z.y),
-    winner = coalesce(winner.x, winner.y)
+    resp_Z = coalesce(resp_Z.x, resp_Z.y)
   ) %>%
-  select(-resp_E.x, -resp_E.y, -resp_Z.x, -resp_Z.y, -winner.x, -winner.y)
+  select(-resp_E.x, -resp_E.y, -resp_Z.x, -resp_Z.y) %>% 
+  group_by(election, wkr) %>%
+  mutate(winner = resp_E == max(resp_E, na.rm = T))
 
 # Recalculate res_Z_l1 and res_E_l1 by party and election and wkr
 
@@ -391,44 +391,105 @@ btw_candidates_1983_2025$formercand[btw_candidates_1983_2025$formercand > 0 & bt
 btw_candidates_1983_2025$female[btw_candidates_1983_2025$female > 0 & btw_candidates_1983_2025$female < 1] <- 0
 btw_candidates_1983_2025$akad[btw_candidates_1983_2025$akad > 0 & btw_candidates_1983_2025$akad < 1] <- 0
 
-for (this_election in c(1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025)) {
-  print(this_election)
-  # election <- 2025
-  election_l1 <- this_election - 4
+formulas <- data.frame(
+  formula = c("resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1", # 28 wrong in 2021
+    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + uniform + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1", # 73 wrong in 2025
+    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional + res_l1_Z*I(proportional^2)  + uniform + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1", # 31 wrong in 2025
+    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1", # 34 wrong in 2021
+    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1", # 28 wrong in 2021
+    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 28 wrong in 2021
+  ),
+  name = c("proportional second vote",
+           "uniform",
+           "proportional squared",
+           "proportional first vote",
+           "proportional both votes",
+           "no adjustment"
+           )
+  )
+
+eval_results <- data.frame(
+  formula = character(),
+  election = integer(),
+  correct_predictions = integer(),
+  total_predictions = integer(),
+  accuracy = numeric()
+)
+
+for (formula in formulas$formula) {
+  print(formula)
   
-  # Split data
-  train <- btw_candidates_1983_2025 %>%
-    filter(
-      (election != this_election),
-      partei != "AND"
-    )
+  # Define model formula
+  model_formula <- as.formula(formula)
   
-  test <- dplyr::filter(btw_candidates_1983_2025, election == this_election)
-  ### Train Linear Model ----------------------------------
+  # Loop through elections
+  for (this_election in c(1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025)) {
+    print(this_election)
+    # election <- 2025
+    election_l1 <- this_election - 4
+    
+    # Split data
+    train <- btw_candidates_1983_2025 %>%
+      filter(
+        (election != this_election),
+        partei != "AND"
+      )
+    
+    test <- dplyr::filter(btw_candidates_1983_2025, election == this_election)
+    
+    ### Train Linear Model ----------------------------------
+    
+    
+    # Fit model
+    reg <- lm(model_formula, data = train)
+    
+    summary(reg)
+    
+    
+    # Predict on test data
+    test$predicted <- predict(reg, newdata = test)
+    test <- test %>% group_by(wkr) %>%  mutate(winner_pred = ifelse(predicted == max(predicted, na.rm = TRUE), 1, 0))
+    
+    
+    
+    table(test$winner == 1)
+    test$winner_pred %>% table
   
+    
+    eval_results <- rbind(
+      eval_results,
+      data.frame(
+        formula = formula,
+        election = this_election,
+        correct_predictions = sum(test$winner == test$winner_pred, na.rm = TRUE),
+        total_predictions = nrow(test),
+        accuracy = sum(test$winner == test$winner_pred, na.rm = TRUE) / nrow(test),
+        correct_winner = sum(test$winner[test$winner == 1] == test$winner_pred[test$winner == 1], na.rm = TRUE),
+        accuracy_winner = sum(test$winner[test$winner == 1] == test$winner_pred[test$winner == 1], na.rm = TRUE) / sum(test$winner == 1, na.rm = TRUE)
+      )
+    )  
+  }
   
-  
-  # Define formula
-  
-  # model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 28 wrong in 2021
-  # model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + uniform + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 73 wrong in 2025
-  # model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional + res_l1_Z*I(proportional^2)  + uniform + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 31 wrong in 2025
-  # model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 34 wrong in 2021
-  # model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 28 wrong in 2021
-  model_formula <- "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1" # 28 wrong in 2021
-  
-  
-  # Fit model
-  reg <- lm(model_formula, data = train)
-  
-  summary(reg)
-  
-  
-  # Predict on test data
-  test$predicted <- predict(reg, newdata = test)
-  test <- test %>% group_by(wkr) %>%  mutate(winner_pred = ifelse(predicted == max(predicted, na.rm = TRUE), 1, 0))
-  
-  table(test$winner, test$winner_pred) %>% print
 }
 
 
+eval_results %>% head
+
+eval_aggregate <- eval_results %>%
+  group_by(formula) %>%
+  summarise(
+    avg_accuracy = mean(accuracy, na.rm = TRUE),
+    avg_correct_predictions = mean(correct_predictions, na.rm = TRUE),
+    avg_total_predictions = mean(total_predictions, na.rm = TRUE),
+    avg_correct_winner = mean(correct_winner, na.rm = TRUE),
+    avg_accuracy_winner = mean(accuracy_winner, na.rm = TRUE)
+  ) %>%
+  arrange(desc(avg_accuracy))
+eval_aggregate %>% head
+
+# Save both to xlsx
+eval_results %>% 
+  write.csv("data/out/eval_results.csv", row.names = FALSE)
+
+eval_aggregate %>%
+  write.csv("data/out/eval_aggregate.csv", row.names = FALSE)
