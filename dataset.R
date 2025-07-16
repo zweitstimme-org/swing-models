@@ -410,6 +410,7 @@ formulas <- data.frame(
 
 eval_results <- data.frame(
   formula = character(),
+  name = character(),
   election = integer(),
   correct_predictions = integer(),
   total_predictions = integer(),
@@ -460,6 +461,7 @@ for (formula in formulas$formula) {
       eval_results,
       data.frame(
         formula = formula,
+        name = formulas$name[formulas$formula == formula],
         election = this_election,
         correct_predictions = sum(test$winner == test$winner_pred, na.rm = TRUE),
         total_predictions = nrow(test),
@@ -475,14 +477,18 @@ for (formula in formulas$formula) {
 
 eval_results %>% head
 
+eval_results$election %>% unique
+
 eval_aggregate <- eval_results %>%
-  group_by(formula) %>%
+  group_by(name, formula) %>%
   summarise(
     avg_accuracy = mean(accuracy, na.rm = TRUE),
     avg_correct_predictions = mean(correct_predictions, na.rm = TRUE),
     avg_total_predictions = mean(total_predictions, na.rm = TRUE),
     avg_correct_winner = mean(correct_winner, na.rm = TRUE),
-    avg_accuracy_winner = mean(accuracy_winner, na.rm = TRUE)
+    avg_accuracy_winner = mean(accuracy_winner, na.rm = TRUE),
+    max_accuracy_winner = max(accuracy_winner, na.rm = TRUE),
+    min_accuracy_winner = min(accuracy_winner, na.rm = TRUE)
   ) %>%
   arrange(desc(avg_accuracy))
 eval_aggregate %>% head
@@ -493,3 +499,22 @@ eval_results %>%
 
 eval_aggregate %>%
   write.csv("data/out/eval_aggregate.csv", row.names = FALSE)
+
+# Library for latex tables
+library(xtable)
+
+eval_aggregate %>% select(name, avg_accuracy_winner, min_accuracy_winner, max_accuracy_winner) %>% 
+  arrange(desc(avg_accuracy_winner)) %>%
+  # Latex table with colnames Model, Average Accuracy, Max. Accuracy, Min. Accuracy, Footnote: Averages, Maximum and Minimum refers to elections 1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025.
+  xtable(caption = "Average, Maximum and Minimum Accuracy of the Models for the Elections 1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025.",
+         label = "tab:eval_aggregate",
+         digits = c(0, 0, 2, 2, 2)) %>%
+  print(include.rownames = FALSE,
+        caption.placement = "top",
+        table.placement = "H",
+        comment = FALSE,
+        sanitize.text.function = identity,
+        add.to.row = list(pos = list(-1), command = "\\hline \\hline \n"),
+        floating = TRUE,
+        size = "\\footnotesize") 
+  
