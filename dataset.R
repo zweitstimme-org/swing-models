@@ -6,11 +6,12 @@
 # ========== Libraries ==========
 # Load required libraries for data manipulation, modeling, and reporting
 suppressPackageStartupMessages({
-  library(tidyverse)
   library(lubridate)
   library(dlm)
   library(xml2)
   library(xtable)
+  library(tidyverse)
+
   # ... add others as needed
 })
 
@@ -40,7 +41,7 @@ district_results_raw <- read_delim(
 # Output: one row per (wkr, party, election)
 district_results_2025 <- district_results_raw %>% 
   filter(Gebietsart == "Wahlkreis" & Gruppenart != "System-Gruppe") %>% 
-  select(Stimme, Prozent, Gebietsnummer, Gruppenname) %>% 
+  dplyr::select(Stimme, Prozent, Gebietsnummer, Gruppenname) %>% 
   # Pivot to wide format: columns for each Stimme (1st/2nd vote)
   pivot_wider(
     names_from = Stimme, 
@@ -60,9 +61,9 @@ district_results_2025 <- district_results_raw %>%
       "BSW" = "bsw"
     )),
     wkr = Gebietsnummer %>% as.numeric()
-  ) %>% select(-c(`1`, `2`, Gebietsnummer, Gruppenname)) %>% 
+  ) %>% dplyr::select(-c(`1`, `2`, Gebietsnummer, Gruppenname)) %>% 
   mutate(election = 2025) %>% 
-  select(wkr, party, resp_E, resp_Z, election)
+  dplyr::select(wkr, party, resp_E, resp_Z, election)
 
 
 # Merge 2025 results into candidate dataset (update resp_E/resp_Z for 2025)
@@ -76,7 +77,7 @@ btw_candidates_updated <- btw_candidates_1983_2025 %>%
     resp_E = coalesce(resp_E.x, resp_E.y),
     resp_Z = coalesce(resp_Z.x, resp_Z.y)
   ) %>%
-  select(-resp_E.x, -resp_E.y, -resp_Z.x, -resp_Z.y) %>% 
+  dplyr::select(-resp_E.x, -resp_E.y, -resp_Z.x, -resp_Z.y) %>% 
   group_by(election, wkr) %>%
   mutate(winner = resp_E == max(resp_E, na.rm = T))
 
@@ -98,7 +99,7 @@ rownames(btw_bund_res) <- c("2021", "2017", "2013")
 # ========== Poll Data Loading and Processing ==========
 # Load federal polling data (long format, drop unused columns)
 federal_polls <- read.csv("data/germany-federal-polls.csv") %>% mutate(date = as.Date(date)) %>% 
-  select(-c(electiondate_lead1, electiondate_l1, vote_share, vote_share_l1))
+  dplyr::select(-c(electiondate_lead1, electiondate_l1, vote_share, vote_share_l1))
 
 # Optionally: add new polls (from web scraping or other sources)
 # new_polls <- get_wahlrecht_polls()
@@ -144,7 +145,7 @@ federal_results <- federal_results %>%
   mutate(vote_share = vote_share/100)
 
 # Add lagged and lead vote shares and election dates by party
-defederal_results <- federal_results %>%
+federal_results <- federal_results %>%
   group_by(party) %>%
   arrange(election) %>%
   mutate(
@@ -160,7 +161,7 @@ defederal_results <- federal_results %>%
 federal_polls <- merge(federal_polls, federal_results, by = c("electiondate", "party"), all = T) %>% 
   mutate(auftraggeber = coalesce(auftraggeber, institute)) %>%
   filter(!is.na(date) & !is.na(vote_share)) %>% 
-  select(-c(id, ag, typ, reg, institute, sample_size, rnd, beg, end, meth, stat, stand)) %>% 
+  dplyr::select(-c(id, ag, typ, reg, institute, sample_size, rnd, beg, end, meth, stat, stand)) %>% 
   arrange(date)
 
 ###########################
@@ -170,7 +171,7 @@ federal_polls <- merge(federal_polls, federal_results, by = c("electiondate", "p
 # ========== Calculate Polling Leads for Each Election ==========
 # Prepare a table of lead times (2 months, 2 weeks, 2 days before each election)
 # for each party, with corresponding poll and result values
-federal_leads <- federal_results %>% select(c(party, electiondate, electiondate_l1, vote_share, vote_share_lead1, vote_share_l1)) %>% unique
+federal_leads <- federal_results %>% dplyr::select(c(party, electiondate, electiondate_l1, vote_share, vote_share_lead1, vote_share_l1)) %>% unique
 federal_leads$party %>% table
 
 # Convert date columns to Date type
@@ -186,14 +187,14 @@ federal_leads$date_months <- federal_leads$electiondate - months(2)
 federal_leads$date_months[is.na(federal_leads$date_months)] <- federal_leads$electiondate[is.na(federal_leads$date_months)] - weeks(8)
 
 # Only keep elections for which we have polling data and a previous election
-defederal_leads <- filter(federal_leads, date_months >= min(federal_polls$date, na.rm = T)) %>% 
+federal_leads <- filter(federal_leads, date_months >= min(federal_polls$date, na.rm = T)) %>% 
   filter(!is.na(electiondate_l1))
 
 # Initialize columns for polling support at each lead time
-defederal_leads$polls_days <- NA
-defederal_leads$polls_weeks <- NA
-defederal_leads$polls_months <- NA
-defederal_leads$calculated <- F
+federal_leads$polls_days <- NA
+federal_leads$polls_weeks <- NA
+federal_leads$polls_months <- NA
+federal_leads$calculated <- F
 
 # Calculate polling support for each party at each lead time using get_latent_support()
 for (i in 1:nrow(federal_leads)) {
@@ -267,17 +268,18 @@ btw_candidates_1983_2025 <- merge(btw_candidates_updated, federal_leads,
 btw_candidates_1983_2025 <- merge(btw_candidates_1983_2025, swing_df, 
                                   by = c("election", "party"), all.x = TRUE)
 
-btw_candidates_1983_2025$proportional <- (btw_candidates_1983_2025$polls_days / btw_candidates_1983_2025$vote_share_l1) / 100
-btw_candidates_1983_2025$uniform <- (btw_candidates_1983_2025$polls_days - btw_candidates_1983_2025$vote_share_l1) / 100
+btw_candidates_1983_2025$proportional <- (btw_candidates_1983_2025$polls_days / btw_candidates_1983_2025$vote_share_l1)
+btw_candidates_1983_2025$uniform <- (btw_candidates_1983_2025$polls_days - btw_candidates_1983_2025$vote_share_l1)
 
 btw_candidates_1983_2025$res_l1_Z_uniform <- btw_candidates_1983_2025$res_l1_Z + btw_candidates_1983_2025$uniform
 
 ### Prepare Training and Test Data -----------------------
-# Remove East German districts for 1990 (not comparable)
+# Remove East German districts for 1990 (not comparable, no prior l1 election results)
 btw_candidates_1983_2025$election %>% unique
 btw_candidates_1983_2025 <- filter(btw_candidates_1983_2025, !(election == 1990 & east == 1))
 
 # Save processed candidate-level data for modeling/analysis
-btw_candidates_1983_2025 %>% 
-  save(file = "data/btw_candidates_1983-2025.RData")
+ 
+save(btw_candidates_1983_2025, file = "data/btw_candidates_1983-2025.RData")
+
 
