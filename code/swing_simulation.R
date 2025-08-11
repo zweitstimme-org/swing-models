@@ -17,9 +17,9 @@ param_grid <- expand.grid(
   n_small_parties = c(2, 4, 6),  # More small parties to test proportional
   n_stronghold_districts = c(10, 25, 40),  # How many districts have high support
   stronghold_share = c(0.3, 0.45, 0.60),   # Vote share in stronghold districts
-  national_swing_variance = c(0.03, 0.05, 0.07),  # National-level swing volatility (increased)
-  swing_concentration = c(0.0, 1.0, 2, 4),  # Degree of swing concentration (more realistic values)
-  district_noise_sd = c(0.002, 0.005, 0.01),  # District-level noise variation
+  national_swing_variance = c(0.01, 0.03, 0.05, 0.07, 0.09),  # National-level swing volatility (increased)
+  swing_concentration = c(0.0, 1.0, 2, 4, 6),  # Degree of swing concentration (more realistic values)
+  district_noise_sd = c(0.002, 0.005, 0.01, 0.03),  # District-level noise variation
   stringsAsFactors = FALSE
 )
 
@@ -609,6 +609,14 @@ results_long <- results_long %>%
     is_german = (n_parties == 7 & n_small_parties == 5 & n_stronghold_districts == 30 & stronghold_share == 0.15)
   )
 
+
+results_long %>% 
+  group_by(model) %>% 
+  summarize(
+    avg_accuracy = mean(accuracy),
+    sd_accuracy = sd(accuracy),
+    n_scenarios = n()
+  ) 
 
 # Create bar plot showing accuracy differences by key parameters
 ggplot(results_long, aes(x = model, y = accuracy, fill = model)) +
