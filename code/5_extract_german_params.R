@@ -135,5 +135,5 @@ german_params <- list(
   geographic_patterns = geographic_patterns
 )
 
-save(german_params, file = "data/german_params.RData")
-cat("\nGerman parameters saved to data/german_params.RData\n") 
+save(german_params, file = "data/out/german_params.RData")
+cat("\nGerman parameters saved to data/out/german_params.RData\n") 

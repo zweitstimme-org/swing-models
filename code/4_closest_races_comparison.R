@@ -4,7 +4,7 @@ library(ggplot2)
 library(dplyr)
 
 # ========== Source Utility Functions ==========
-source("code/utils.R")
+source("code/0_utils.R")
 
 # ========== Load Data ==========
 # Please ensure btw_candidates_1983_2025 is loaded in your environment
@@ -12,9 +12,16 @@ source("code/utils.R")
 # btw_candidates_1983_2025 <- read_csv("data/btw_candidates_1983-2025_full.csv")
 
 load("data/btw_candidates_1983-2025.RData")
-
+btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>% 
+  mutate(formercand = ifelse(formercand == 1, 1, 0),
+         female = ifelse(female == 1, 1, 0),
+         akad = ifelse(akad == 1, 1, 0)
+         )
 
 # ========== Define Models ==========
+# resp_E = candidate vote share (first vote/Erststimme)
+# resp_Z = party vote share (second vote/Zweitstimme)
+# l1 = lag (previous election results)
 model_formulas <- list(
   proportional_both_votes = as.formula(
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
@@ -49,7 +56,7 @@ for (year in years) {
       filter(predicted == max(predicted, na.rm = TRUE)) %>%
       slice(1) %>% # In case of ties, take the first
       ungroup() %>%
-      select(wkr, !!paste0("winner_", model_name) := party)
+      dplyr::select(wkr, !!paste0("winner_", model_name) := party)
 
     model_preds[[model_name]] <- model_winner
   }
@@ -82,7 +89,7 @@ for (year in years) {
     group_by(wkr) %>%
     slice(1) %>% # land and resp_E are the same for all candidates in a wkr, so just take the first
     ungroup() %>%
-    select(wkr, land)
+    dplyr::select(wkr, land)
 
   all_preds <- left_join(all_preds, land_respE_all, by = "wkr")
 
@@ -92,7 +99,7 @@ for (year in years) {
     arrange(desc(resp_E)) %>%
     slice(1) %>%
     ungroup() %>%
-    select(wkr, resp_E_actual_winner = resp_E)
+    dplyr::select(wkr, resp_E_actual_winner = resp_E)
   all_preds <- left_join(all_preds, actual_winner_respE, by = "wkr")
 
   # For each model, calculate the error for the predicted winner
@@ -126,13 +133,16 @@ for (year in years) {
 final_results <- bind_rows(results_list)
 
 # ========== Output ==========
+# Create output directories if they don't exist
 if (!dir.exists("data/out")) dir.create("data/out", recursive = TRUE)
+if (!dir.exists("figures")) dir.create("figures", recursive = TRUE)
+
 write_csv(final_results, "data/out/closest_races_comparison.csv")
 print(final_results) 
 
 
 ## Save plot to pdf
-pdf(file = "data/out/error-density.pdf", height = 6, width = 10)
+pdf(file = "figures/error-density.pdf", height = 6, width = 10)
 final_results$error_uniform_swing %>% density(na.rm = T) %>% plot(yli = c(0, 5), main = "Density of Errors")
 final_results$error_proportional_both_votes %>% density(na.rm = T) %>% lines(col= "red")
 dev.off()
@@ -191,7 +201,7 @@ ggplot(tidy_both, aes(x = term, y = estimate, color = model, shape = model)) +
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave("data/out/coefplot_error_comparison_custom.pdf", width = 10, height = 6)
+ggsave("figures/coefplot_error_comparison_custom.pdf", width = 10, height = 6)
 
 # --- Error Magnitude Comparison (Mispredicted Cases) ---
 tidy_mispred_prop <- tidy(lm_error_mispred_prop) %>% mutate(model = "Proportional Both Votes")
@@ -210,7 +220,7 @@ ggplot(tidy_mispred_both, aes(x = term, y = estimate, color = model, shape = mod
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave("data/out/coefplot_error_mispredicted_comparison_custom.pdf", width = 10, height = 6)
+ggsave("figures/coefplot_error_mispredicted_comparison_custom.pdf", width = 10, height = 6)
 
 # --- Correct Prediction Comparison (Logistic) ---
 tidy_logit_prop <- tidy(glm_correct_prop) %>% mutate(model = "Proportional Both Votes")
@@ -229,7 +239,7 @@ ggplot(tidy_logit_both, aes(x = term, y = estimate, color = model, shape = model
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave("data/out/coefplot_correct_comparison_custom.pdf", width = 10, height = 6)
+ggsave("figures/coefplot_correct_comparison_custom.pdf", width = 10, height = 6)
 
 # Summary statistics comparison
 cat("\n=== ERROR MAGNITUDE COMPARISON ===\n")
@@ -254,7 +264,7 @@ mispredicted_proportional <- all_errors %>%
     predicted_resp_E_actual_winner = error_proportional_both_votes + resp_E_actual_winner,
     model = "proportional_both_votes"
   ) %>%
-  select(year, wkr, actual_winner, winner_proportional_both_votes, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
+  dplyr::select(year, wkr, actual_winner, winner_proportional_both_votes, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
 
 # For uniform_swing model
 mispredicted_uniform <- all_errors %>%
@@ -263,7 +273,7 @@ mispredicted_uniform <- all_errors %>%
     predicted_resp_E_actual_winner = error_uniform_swing + resp_E_actual_winner,
     model = "uniform_swing"
   ) %>%
-  select(year, wkr, actual_winner, winner_uniform_swing, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
+  dplyr::select(year, wkr, actual_winner, winner_uniform_swing, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
 
 # Combine both models
 mispredicted_df <- bind_rows(mispredicted_proportional, mispredicted_uniform)
@@ -276,8 +286,8 @@ ggplot(mispredicted_df, aes(x = resp_E_actual_winner, y = predicted_resp_E_actua
   geom_point(aes(color = model, shape = model), alpha = 0.7) +
   facet_wrap(~ year) +
   labs(
-    x = "Actual Result (resp_E of actual winner)",
-    y = "Predicted Result (resp_E of actual winner)",
+    x = "Actual Candidate Vote Share of Winner",
+    y = "Predicted Candidate Vote Share of Winner",
     title = "Actual vs Predicted Results for Mispredicted Constituency Winners"
   ) +
   theme_minimal() +
@@ -285,12 +295,12 @@ ggplot(mispredicted_df, aes(x = resp_E_actual_winner, y = predicted_resp_E_actua
 
 
 # Save as pdf
-ggsave("data/out/mispredicted_results.pdf", width = 10, height = 6)
+ggsave("figures/mispredicted_results.pdf", width = 10, height = 6)
 
 # Create connected plot for 2025
 mispredicted_2025 <- mispredicted_df %>% 
   filter(year == 2025) %>%
-  select(wkr, actual_winner, resp_E_actual_winner, predicted_resp_E_actual_winner, model) %>%
+  dplyr::select(wkr, actual_winner, resp_E_actual_winner, predicted_resp_E_actual_winner, model) %>%
   pivot_wider(
     names_from = model,
     values_from = predicted_resp_E_actual_winner,
@@ -307,22 +317,28 @@ ggplot(mispredicted_2025, aes(x = resp_E_actual_winner)) +
   geom_point(aes(y = pred_proportional_both_votes, color = "proportional_both_votes", shape = "proportional_both_votes"), alpha = 0.7) +
   geom_point(aes(y = pred_uniform_swing, color = "uniform_swing", shape = "uniform_swing"), alpha = 0.7) +
   labs(
-    x = "Actual Result (resp_E of actual winner)",
-    y = "Predicted Result (resp_E of actual winner)",
+    x = "Actual Candidate Vote Share of Winner",
+    y = "Predicted Candidate Vote Share of Winner",
     # title = "Actual vs Predicted Results for Mispredicted Constituency Winners (2025)",
     color = "Model",
     shape = "Model"
   ) +
-  scale_color_manual(values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02")) +
-  scale_shape_manual(values = c("proportional_both_votes" = 16, "uniform_swing" = 17)) +
+  scale_color_manual(
+    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
+  scale_shape_manual(
+    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
   theme_minimal()
 
 # Save 2025 plot
-ggsave("data/out/mispredicted_results_2025_connected.pdf", width = 8, height = 6)
+ggsave("figures/mispredicted_results_2025_connected.pdf", width = 8, height = 6)
 
 # Prepare data: one row per (year, wkr), columns for both models' predictions
 mispredicted_wide <- mispredicted_df %>%
-  select(year, wkr, resp_E_actual_winner, model, predicted_resp_E_actual_winner) %>%
+  dplyr::select(year, wkr, resp_E_actual_winner, model, predicted_resp_E_actual_winner) %>%
   pivot_wider(
     names_from = model,
     values_from = predicted_resp_E_actual_winner,
@@ -361,18 +377,27 @@ ggplot(mispredicted_wide, aes(x = resp_E_actual_winner)) +
   geom_point(aes(y = pred_uniform_swing, color = "uniform_swing", shape = "uniform_swing"), alpha = 0.7) +
   facet_wrap(~ year) +
   labs(
-    x = "Actual Result (resp_E of actual winner)",
-    y = "Predicted Result (resp_E of actual winner)",
+    x = "Actual Candidate Vote Share of Winner",
+    y = "Predicted Candidate Vote Share of Winner",
     color = "Model",
     shape = "Model"
   ) +
-  scale_color_manual(values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02")) +
-  scale_fill_manual(values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02")) +
-  scale_shape_manual(values = c("proportional_both_votes" = 16, "uniform_swing" = 17)) +
+  scale_color_manual(
+    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
+  scale_fill_manual(
+    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
+  scale_shape_manual(
+    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
   theme_minimal() +
   theme(legend.position = "bottom", plot.title = element_blank())
 
-ggsave("data/out/mispredicted_results_connected_facets.pdf", width = 12, height = 8)
+ggsave("figures/mispredicted_results_connected_facets.pdf", width = 12, height = 8)
 
 
 

@@ -16,7 +16,7 @@ suppressPackageStartupMessages({
 
 # ========== Source Utility Functions ==========
 # Source custom functions from code/utils.R
-source("code/utils.R")
+source("code/0_utils.R")
 
 load("data/btw_candidates_1983-2025.RData")
 
@@ -227,5 +227,5 @@ print(legend_plot)
 final_plot <- (wrap_plots(plots_nolegend, ncol = 4) / legend_plot) +
   plot_layout(heights = c(10, 1))
 print(final_plot)
-ggsave("data/out/all_years_incorrect_forecasts.pdf", final_plot, width = 16, height = 8)
+ggsave("figures/all_years_incorrect_forecasts.pdf", final_plot, width = 16, height = 8)
 

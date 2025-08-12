@@ -9,17 +9,17 @@ library(MASS)
 set.seed(123)
 
 n_districts <- 100
-n_sim_per_scenario <- 1
+n_sim_per_scenario <- 2
 
 # Simplified parameter grid focusing on small party clustering
 param_grid <- expand.grid(
-  n_parties = c(4, 5, 6, 7),  # At least 1 large party
-  n_small_parties = c(2, 4, 6),  # More small parties to test proportional
+  n_parties = c(2, 3, 4, 5, 6, 7),  # At least 1 large party
+  n_small_parties = c(0, 2, 4, 6),  # More small parties to test proportional
   n_stronghold_districts = c(10, 25, 40),  # How many districts have high support
   stronghold_share = c(0.3, 0.45, 0.60),   # Vote share in stronghold districts
   national_swing_variance = c(0.01, 0.03, 0.05, 0.07, 0.09),  # National-level swing volatility (increased)
-  swing_concentration = c(0.0, 1.0, 2, 4, 6),  # Degree of swing concentration (more realistic values)
-  district_noise_sd = c(0.002, 0.005, 0.01, 0.03),  # District-level noise variation
+  swing_concentration = c(0, 1, 2, 4, 6, 8),  # Degree of swing concentration (more realistic values)
+  district_noise_sd = c(0.002, 0.005, 0.01, 0.02, 0.03),  # District-level noise variation
   stringsAsFactors = FALSE
 )
 
@@ -28,7 +28,7 @@ param_grid <- param_grid %>%
   filter(n_small_parties <= n_parties - 1)
 
 # Load extracted German parameters
-load("data/german_params.RData")
+load("data/out/german_params.RData")
 
 # Add realistic German scenario using extracted parameters
 german_scenario <- data.frame(
@@ -618,16 +618,123 @@ results_long %>%
     n_scenarios = n()
   ) 
 
-# Create bar plot showing accuracy differences by key parameters
-ggplot(results_long, aes(x = model, y = accuracy, fill = model)) +
-  geom_boxplot() + 
-  facet_grid(n_small_parties ~ stronghold_share + n_parties) +
-  scale_fill_manual(values = c("accuracy_uniform" = "#E69F00", "accuracy_proportional" = "#56B4E9")) +
-  scale_x_discrete(labels = c("accuracy_uniform" = "uni", "accuracy_proportional" = "prop")) +
-  labs(title = "Accuracy by model, number of parties, small parties, and swing volatility",
-       subtitle = "Faceted by ...",
-       y = "Accuracy (share of correctly predicted districts)",
-       x = "Model") +
+# Create heatmap showing when each model performs better
+model_comparison <- results_long %>%
+  group_by(n_parties, n_small_parties, swing_concentration, district_noise_sd) %>%
+  summarize(
+    uniform_accuracy = mean(accuracy[model == "accuracy_uniform"]),
+    proportional_accuracy = mean(accuracy[model == "accuracy_proportional"]),
+    accuracy_diff = uniform_accuracy - proportional_accuracy,
+    .groups = "drop"
+  )
+
+# Create parameter grid visualization
+param_grid_viz <- param_grid %>%
+  mutate(
+    # Create a unique scenario ID
+    scenario_id = row_number(),
+    # Create a categorical variable for visualization
+    param_combo = paste0("P", n_parties, "_S", n_small_parties, "_C", swing_concentration)
+  )
+
+# Plot 0: Parameter grid structure
+p0 <- ggplot(param_grid_viz, aes(x = n_parties, y = n_small_parties, 
+                                 color = factor(swing_concentration), 
+                                 size = district_noise_sd)) +
+  geom_point(alpha = 0.7) +
+  scale_color_brewer(palette = "Set1", name = "Swing\nConcentration") +
+  scale_size_continuous(name = "District\nNoise SD", range = c(2, 6)) +
+  labs(
+    title = "Parameter Grid Structure",
+    subtitle = "Each point represents a scenario combination",
+    x = "Number of Parties", 
+    y = "Number of Small Parties",
+    caption = paste("Total scenarios:", nrow(param_grid), 
+                   "| Total simulations:", nrow(param_grid) * n_sim_per_scenario)
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+# Add text annotations for key parameter ranges
+p0 <- p0 + 
+  annotate("text", x = max(param_grid$n_parties) + 0.5, y = max(param_grid$n_small_parties) + 0.5,
+           label = paste("Parameter Ranges:\n",
+                        "• Parties:", min(param_grid$n_parties), "-", max(param_grid$n_parties), "\n",
+                        "• Small Parties:", min(param_grid$n_small_parties), "-", max(param_grid$n_small_parties), "\n",
+                        "• Swing Concentration:", paste(range(param_grid$swing_concentration), collapse = "-"), "\n",
+                        "• District Noise SD:", paste(range(param_grid$district_noise_sd), collapse = "-")),
+           hjust = 0, vjust = 1, size = 3, color = "gray30")
+p0
+
+# Plot 1: Heatmap of accuracy difference by number of parties and small parties
+ggplot(model_comparison, aes(x = n_parties, y = n_small_parties, fill = accuracy_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "#56B4E9",
+    mid = "white",
+    high = "#E69F00",
+    midpoint = 0,
+    name = "Accuracy Difference\n(Uniform - Proportional)",
+    labels = function(x) formatC(x, format = "f", digits = 3)
+  ) +
+  guides(
+    fill = guide_colourbar(
+      barwidth = 20,  # increase width
+      barheight = 0.8
+    )
+  ) +
+  labs(
+    title = "When Does Each Model Perform Better?",
+    subtitle = "Blue = Proportional better, Orange = Uniform better",
+    x = "Number of Parties", 
+    y = "Number of Small Parties"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Plot 2: Accuracy difference by swing concentration and district noise
+ggplot(model_comparison, aes(x = swing_concentration, y = district_noise_sd, fill = accuracy_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "#56B4E9",
+    mid = "white",
+    high = "#E69F00",
+    midpoint = 0,
+    name = "Accuracy Difference\n(Uniform - Proportional)",
+    labels = function(x) formatC(x, format = "f", digits = 3)
+  ) +
+  guides(
+    fill = guide_colourbar(
+      barwidth = 20,  # increase width
+      barheight = 0.8
+    )
+  ) +
+  labs(
+    title = "Effect of Swing Concentration and District Noise",
+    subtitle = "Blue = Proportional better, Orange = Uniform better",
+    x = "Swing Concentration", 
+    y = "District Noise SD"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Plot 3: Line plot showing the key interaction from regression
+ggplot(model_comparison, aes(
+  x = n_parties,
+  y = accuracy_diff,
+  color = factor(n_small_parties),
+  shape = factor(n_small_parties)
+)) +
+  geom_point(size = 2, position = position_jitter(width = 0.15, height = 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_brewer(palette = "Set1", name = "Small Parties") +
+  scale_shape_manual(values = 1:5, name = "Small Parties") +
+  labs(
+    title = "Key Finding: More Parties Favor Uniform, More Small Parties Favor Proportional",
+    subtitle = "Positive = Uniform better, Negative = Proportional better",
+    x = "Number of Parties", 
+    y = "Accuracy Difference (Uniform - Proportional)"
+  ) +
   theme_minimal() +
   theme(legend.position = "bottom")
 
@@ -671,8 +778,12 @@ proportional_favorable <- summary_results %>%
   ) %>%
   filter(proportional_better == TRUE)
 
-print("Scenarios where proportional is better:")
-# print(proportional_favorable %>% dplyr::select(n_parties, n_small_parties, swing_sd, stronghold_share, accuracy_uniform, accuracy_proportional, performance_diff))
+uniform_favorable <- summary_results %>%
+  mutate(
+    uniform_better = accuracy_uniform > accuracy_proportional,
+    performance_diff = accuracy_uniform - accuracy_proportional
+  ) %>%
+  filter(uniform_better == TRUE)
 
 print("Summary of when proportional wins:")
 print(proportional_favorable %>%
@@ -682,6 +793,16 @@ print(proportional_favorable %>%
     avg_national_swing_variance = mean(national_swing_variance),
     avg_stronghold_share = mean(stronghold_share)
   ))
+
+print("Scenarios where uniform wins:")
+print(uniform_favorable %>%
+  summarize(
+    n_scenarios = n(),
+    avg_n_small_parties = mean(n_small_parties),
+    avg_national_swing_variance = mean(national_swing_variance),
+    avg_stronghold_share = mean(stronghold_share)
+  ))
+
 
 # Analyze by swing concentration
 print("Performance by swing concentration:")
@@ -736,6 +857,47 @@ model2 <- lm(relative_performance ~ log_n_parties + log_n_small_parties + strong
 print("Regression 2: Relative accuracy improvement (%)")
 print(summary(model2))
 
+# Create coefficient plot for the main regression
+library(broom)
+
+# Get coefficient data
+coef_data <- tidy(model1, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    term = case_when(
+      term == "log_n_parties" ~ "Log(Number of Parties)",
+      term == "log_n_small_parties" ~ "Log(Number of Small Parties)",
+      term == "stronghold_ratio" ~ "Stronghold Ratio",
+      term == "log_national_swing_variance" ~ "Log(National Swing Variance)",
+      term == "swing_concentration" ~ "Swing Concentration",
+      term == "log_district_noise" ~ "Log(District Noise)",
+      term == "small_stronghold_ratio" ~ "Small Party Stronghold Ratio",
+      TRUE ~ term
+    ),
+    # Order by absolute effect size
+    abs_estimate = abs(estimate)
+  ) %>%
+  arrange(desc(abs_estimate))
+
+# Coefficient plot
+ggplot(coef_data, aes(x = estimate, y = reorder(term, abs_estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 3, color = "#0072B2") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "#0072B2") +
+  labs(
+    title = "Regression Coefficients",
+    subtitle = "Positive = Uniform better, Negative = Proportional better",
+    x = "Coefficient Estimate (Accuracy Difference)",
+    y = NULL,
+    caption = "Error bars show 95% confidence intervals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
 # Separate regressions by number of small parties
 few_small_data <- regression_data %>% filter(n_small_parties <= 2)
 many_small_data <- regression_data %>% filter(n_small_parties >= 3)
@@ -758,7 +920,7 @@ regression_data %>%
   group_by(n_small_parties) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
-    avg_relative_accuracy = mean(relative_performance),
+    avg_relative_accuracy = mean(relative_performance, na.rm = T),
     avg_accuracy_uniform = mean(accuracy_uniform),
     avg_accuracy_proportional = mean(accuracy_proportional),
     n = n()
@@ -770,7 +932,7 @@ regression_data %>%
   group_by(stronghold_ratio) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
-    avg_relative_accuracy = mean(relative_performance),
+    avg_relative_accuracy = mean(relative_performance, na.rm = T),
     avg_accuracy_uniform = mean(accuracy_uniform),
     avg_accuracy_proportional = mean(accuracy_proportional),
     n = n()
@@ -782,7 +944,7 @@ regression_data %>%
   group_by(national_swing_variance) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
-    avg_relative_accuracy = mean(relative_performance),
+    avg_relative_accuracy = mean(relative_performance, na.rm = T),
     avg_accuracy_uniform = mean(accuracy_uniform),
     avg_accuracy_proportional = mean(accuracy_proportional),
     n = n()
@@ -794,7 +956,7 @@ regression_data %>%
   group_by(district_noise_sd) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
-    avg_relative_accuracy = mean(relative_performance),
+    avg_relative_accuracy = mean(relative_performance, na.rm = T),
     avg_accuracy_uniform = mean(accuracy_uniform),
     avg_accuracy_proportional = mean(accuracy_proportional),
     n = n()
@@ -845,22 +1007,207 @@ if (abs(simulation_diff) < 0.01) {
   cat("✗ Simulation shows uniform better (unlike empirical)\n")
 }
 
-# ========== 9. German Reality vs Simulation Assumptions ==========
-cat("\n=== GERMAN REALITY VS SIMULATION ASSUMPTIONS ===\n")
-cat("German Reality:\n")
-cat("- Small parties: 5-15% baseline (FDP, Grüne, Linke)\n")
-cat("- Gradual geographic variation\n")
-cat("- Moderate swings: 1-3%\n")
-cat("- ", german_params$n_districts, " districts\n")
+# ========== 9. Save Results and Create Publication Outputs ==========
+cat("\n=== SAVING RESULTS AND CREATING OUTPUTS ===\n")
 
-cat("\nCurrent Simulation:\n")
-cat("- Small parties: 5% baseline in most districts\n")
-cat("- Extreme strongholds: 30-50% in 5-15 districts\n")
-cat("- Swings: 1-3% SD (realistic)\n")
-cat("- 100 districts\n")
+# Create output directories
+dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+dir.create("tables", showWarnings = FALSE, recursive = TRUE)
+dir.create("data/out", showWarnings = FALSE, recursive = TRUE)
 
-cat("\nRecommendations to match German reality:\n")
-cat("1. Increase small party baseline to 8-12%\n")
-cat("2. Use gradual geographic variation instead of extreme strongholds\n")
-cat("3. Add more realistic party characteristics\n")
+# Save the main results dataframe
+write.csv(all_results_df, "data/out/simulation_results.csv", row.names = FALSE)
+saveRDS(all_results_df, "data/out/simulation_results.rds")
 
+# Save summary results
+write.csv(summary_results, "data/out/simulation_summary.csv", row.names = FALSE)
+saveRDS(summary_results, "data/out/simulation_summary.rds")
+
+# Save regression data
+write.csv(regression_data, "data/out/regression_data.csv", row.names = FALSE)
+saveRDS(regression_data, "data/out/regression_data.rds")
+
+# Save model comparison data
+write.csv(model_comparison, "data/out/model_comparison.csv", row.names = FALSE)
+saveRDS(model_comparison, "data/out/model_comparison.rds")
+
+cat("✓ Results saved to data/out/\n")
+
+# Save individual plots using ggsave
+cat("Saving plots to figures/\n")
+
+# Plot 0: Parameter grid structure
+ggsave("figures/01_parameter_grid.png", p0, width = 10, height = 8, dpi = 300)
+ggsave("figures/01_parameter_grid.pdf", p0, width = 10, height = 8)
+
+# Plot 1: Heatmap of accuracy difference by number of parties and small parties
+p1 <- ggplot(model_comparison, aes(x = n_parties, y = n_small_parties, fill = accuracy_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "#56B4E9",  # Blue for proportional better
+    mid = "white",    # White for equal
+    high = "#E69F00", # Orange for uniform better
+    midpoint = 0,
+    name = "Accuracy Difference\n(Uniform - Proportional)"
+  ) +
+  labs(
+    title = "When Does Each Model Perform Better?",
+    subtitle = "Blue = Proportional better, Orange = Uniform better",
+    x = "Number of Parties", 
+    y = "Number of Small Parties"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave("figures/02_model_performance_heatmap.png", p1, width = 10, height = 8, dpi = 300)
+ggsave("figures/02_model_performance_heatmap.pdf", p1, width = 10, height = 8)
+
+# Plot 2: Accuracy difference by swing concentration and district noise
+p2 <- ggplot(model_comparison, aes(x = swing_concentration, y = district_noise_sd, fill = accuracy_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = "#56B4E9",  # Blue for proportional better
+    mid = "white",    # White for equal
+    high = "#E69F00", # Orange for uniform better
+    midpoint = 0,
+    name = "Accuracy Difference\n(Uniform - Proportional)"
+  ) +
+  labs(
+    title = "Effect of Swing Concentration and District Noise",
+    subtitle = "Blue = Proportional better, Orange = Uniform better",
+    x = "Swing Concentration", 
+    y = "District Noise SD"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave("figures/03_swing_concentration_heatmap.png", p2, width = 10, height = 8, dpi = 300)
+ggsave("figures/03_swing_concentration_heatmap.pdf", p2, width = 10, height = 8)
+
+# Plot 3: Line plot showing the key interaction from regression
+p3 <- ggplot(model_comparison, aes(
+  x = n_parties,
+  y = accuracy_diff,
+  color = factor(n_small_parties),
+  shape = factor(n_small_parties)
+)) +
+  geom_point(size = 2, position = position_jitter(width = 0.15, height = 0)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_brewer(palette = "Set1", name = "Small Parties") +
+  scale_shape_manual(values = 1:5, name = "Small Parties") +
+  labs(
+    title = "Key Finding: More Parties Favor Uniform, More Small Parties Favor Proportional",
+    subtitle = "Positive = Uniform better, Negative = Proportional better",
+    x = "Number of Parties", 
+    y = "Accuracy Difference (Uniform - Proportional)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave("figures/04_key_interaction.png", p3, width = 10, height = 8, dpi = 300)
+ggsave("figures/04_key_interaction.pdf", p3, width = 10, height = 8)
+
+# Plot 4: Coefficient plot
+p4 <- ggplot(coef_data, aes(x = estimate, y = reorder(term, abs_estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(size = 3, color = "#0072B2") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "#0072B2") +
+  labs(
+    title = "Regression Coefficients: What Explains Model Performance Differences?",
+    subtitle = "Positive = Uniform better, Negative = Proportional better",
+    x = "Coefficient Estimate (Accuracy Difference)",
+    y = NULL,
+    caption = "Error bars show 95% confidence intervals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+ggsave("figures/05_regression_coefficients.png", p4, width = 10, height = 8, dpi = 300)
+ggsave("figures/05_regression_coefficients.pdf", p4, width = 10, height = 8)
+
+cat("✓ All plots saved to figures/ (PNG and PDF formats)\n")
+
+# Create LaTeX tables using stargazer
+library(stargazer)
+
+# Table 1: Summary statistics
+stargazer(summary_results, 
+          type = "latex",
+          title = "Summary Statistics by Scenario",
+          out = "tables/summary_table.tex",
+          digits = 3,
+          summary = FALSE)
+
+# Table 2: Regression results
+stargazer(model1, model2,
+          type = "latex",
+          title = "Regression Results: Explaining Model Performance Differences",
+          column.labels = c("Accuracy Difference", "Relative Performance"),
+          dep.var.labels = c("Uniform - Proportional", "Proportional Improvement (%)"),
+          out = "tables/regression_table.tex",
+          digits = 4,
+          style = "aer")
+
+# Table 3: Model comparison by key parameters
+model_comparison_table <- model_comparison %>%
+  group_by(n_parties, n_small_parties) %>%
+  summarize(
+    n_scenarios = n(),
+    uniform_better = sum(accuracy_diff > 0),
+    proportional_better = sum(accuracy_diff < 0),
+    avg_accuracy_diff = mean(accuracy_diff),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    better_model = case_when(
+      uniform_better > proportional_better ~ "Uniform",
+      proportional_better > uniform_better ~ "Proportional",
+      TRUE ~ "Equal"
+    )
+  )
+
+stargazer(model_comparison_table,
+          type = "latex",
+          title = "Model Performance by Party Configuration",
+          out = "tables/model_comparison_table.tex",
+          digits = 3,
+          summary = FALSE)
+
+cat("✓ LaTeX tables saved to tables/\n")
+
+# Create a summary report
+sink("data/out/simulation_report.txt")
+cat("SWING MODEL SIMULATION REPORT\n")
+cat("============================\n\n")
+cat("Date:", Sys.Date(), "\n")
+cat("Total scenarios:", nrow(summary_results), "\n")
+cat("Total simulations:", nrow(all_results_df), "\n\n")
+
+cat("KEY FINDINGS:\n")
+cat("-------------\n")
+cat("1. Number of parties:", round(coef(model1)["log_n_parties"], 4), "effect on uniform advantage\n")
+cat("2. Number of small parties:", round(coef(model1)["log_n_small_parties"], 4), "effect on proportional advantage\n")
+cat("3. R-squared:", round(summary(model1)$r.squared, 3), "\n\n")
+
+cat("SCENARIOS WHERE PROPORTIONAL WINS:\n")
+cat("----------------------------------\n")
+print(proportional_favorable %>%
+  summarize(
+    n_scenarios = n(),
+    avg_n_small_parties = mean(n_small_parties),
+    avg_national_swing_variance = mean(national_swing_variance),
+    avg_stronghold_share = mean(stronghold_share)
+  ))
+
+cat("\nSCENARIOS WHERE UNIFORM WINS:\n")
+cat("-----------------------------\n")
+print(uniform_favorable %>%
+  summarize(
+    n_scenarios = n(),
+    avg_n_small_parties = mean(n_small_parties),
+    avg_national_swing_variance = mean(national_swing_variance),
+    avg_stronghold_share = mean(stronghold_share)
+  ))
+
+sink()
+cat("✓ Report saved to data/out/simulation_report.txt\n")

@@ -28,6 +28,9 @@ btw_candidates_1983_2025$akad[btw_candidates_1983_2025$akad > 0 & btw_candidates
 
 # ========== Define Model Formulas ==========
 # Each formula represents a different model specification for predicting election outcomes
+# resp_E = candidate vote share (first vote/Erststimme)
+# resp_Z = party vote share (second vote/Zweitstimme) 
+# l1 = lag (previous election results)
 formulas <- data.frame(
   formula = c(
     # 1. Proportional adjustment using second vote
@@ -215,7 +218,7 @@ write.csv(agg_leads, "data/out/eval_aggregate_leads.csv", row.names = FALSE)
 eval_aggregate %>% select(name, avg_accuracy_winner, min_accuracy_winner, max_accuracy_winner) %>% 
   arrange(desc(avg_accuracy_winner)) %>%
   # Create LaTeX table with custom caption and formatting
-  xtable(caption = "Average, Maximum and Minimum Accuracy of the Models for the Elections 1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025.",
+  xtable(caption = "Average, Maximum and Minimum Accuracy of Candidate Vote Share Prediction Models for the Elections 1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025.",
          label = "tab:eval_aggregate",
          digits = c(0, 0, 2, 2, 2)) %>%
   print(include.rownames = FALSE,
@@ -235,7 +238,7 @@ ggplot(eval_aggregate, aes(x = reorder(name, avg_accuracy_winner), y = avg_accur
   geom_errorbar(aes(ymin = min_accuracy_winner, ymax = max_accuracy_winner), width = 0.2) +
   labs(title = "Out-of-sample Performance of Models",
        x = "Model",
-       y = "Average Accuracy (Winner)") +
+       y = "Average Accuracy (Winner Prediction)") +
   theme_minimal() +
   coord_flip() +
   theme(text = element_text(size = 12))
