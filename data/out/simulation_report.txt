@@ -1,0 +1,26 @@
+SWING MODEL SIMULATION REPORT
+============================
+
+Date: 20312 
+Total scenarios: 20251 
+Total simulations: 40502 
+
+KEY FINDINGS:
+-------------
+1. Number of parties: 0.0028 effect on uniform advantage
+2. Number of small parties: -8e-04 effect on proportional advantage
+3. R-squared: 0.031 
+
+SCENARIOS WHERE PROPORTIONAL WINS:
+----------------------------------
+# A tibble: 1 × 4
+  n_scenarios avg_n_small_parties avg_national_swing_variance avg_stronghold_share
+        <int>               <dbl>                       <dbl>                <dbl>
+1        4430                2.31                      0.0556                0.447
+
+SCENARIOS WHERE UNIFORM WINS:
+-----------------------------
+# A tibble: 1 × 4
+  n_scenarios avg_n_small_parties avg_national_swing_variance avg_stronghold_share
+        <int>               <dbl>                       <dbl>                <dbl>
+1        5537                1.79                      0.0579                0.451

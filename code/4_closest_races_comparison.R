@@ -290,6 +290,18 @@ ggplot(mispredicted_df, aes(x = resp_E_actual_winner, y = predicted_resp_E_actua
     y = "Predicted Candidate Vote Share of Winner",
     title = "Actual vs Predicted Results for Mispredicted Constituency Winners"
   ) +
+  scale_color_manual(
+    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
+  scale_shape_manual(
+    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
+  scale_fill_manual(
+    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
+    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+  ) +
   theme_minimal() +
   theme(legend.position = "bottom", plot.title = element_blank())
 
