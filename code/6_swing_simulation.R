@@ -2,14 +2,16 @@
 # Simplified simulation focusing on small parties with strongholds
 # Tests whether proportional swing works better for clustered small parties
 
+library(ggplot2)
 library(tidyverse)
 library(MASS)
+library(patchwork)
 
 # ========== 1. Define Simplified Parameter Grid ==========
 set.seed(123)
 
 n_districts <- 100
-n_sim_per_scenario <- 2
+n_sim_per_scenario <- 1
 
 # Simplified parameter grid focusing on small party clustering
 param_grid <- expand.grid(
@@ -17,43 +19,36 @@ param_grid <- expand.grid(
   n_small_parties = c(0, 2, 4, 6),  # More small parties to test proportional
   n_stronghold_districts = c(10, 25, 40),  # How many districts have high support
   stronghold_share = c(0.3, 0.45, 0.60),   # Vote share in stronghold districts
-  national_swing_variance = c(0.01, 0.03, 0.05, 0.07, 0.09),  # National-level swing volatility (increased)
-  swing_concentration = c(0, 1, 2, 4, 6, 8),  # Degree of swing concentration (more realistic values)
-  district_noise_sd = c(0.002, 0.005, 0.01, 0.02, 0.03),  # District-level noise variation
+  national_level_vote_variance = c(0.01, 0.03, 0.05, 0.07, 0.09),  # National-level vote volatility
+  uniform_share = c(0, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1),  # Data generation share of uniform swing
+  between_district_vote_volatility = c(0.002, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03),  # Between-district vote volatility
   stringsAsFactors = FALSE
 )
 
-# Filter out invalid combinations (n_small_parties cannot exceed n_parties - 1)
+# Filter out invalid combinations and unrealistic party combinations
 param_grid <- param_grid %>%
-  filter(n_small_parties <= n_parties - 1)
+  filter(n_small_parties <= n_parties - 1) %>%
+  # Add realistic constraints: max 4-5 large parties when 0 small parties, 
+  # and for each 2 small parties, reduce max large parties by 1
+  mutate(n_large_parties = n_parties - n_small_parties) %>%
+  filter(
+    # When no small parties: max 5 large parties
+    !(n_small_parties == 0 & n_large_parties > 5) &
+    # When 2 small parties: max 4 large parties  
+    !(n_small_parties == 2 & n_large_parties > 4) &
+    # When 4 small parties: max 3 large parties
+    !(n_small_parties == 4 & n_large_parties > 3) &
+    # When 6 small parties: max 2 large parties
+    !(n_small_parties == 6 & n_large_parties > 2) &
+    # Always need at least 1 large party
+    n_large_parties >= 1
+  ) %>%
+  dplyr::select(-n_large_parties)  # Remove the helper column
 
-# Load extracted German parameters
-load("data/out/german_params.RData")
 
-# Add realistic German scenario using extracted parameters
-german_scenario <- data.frame(
-  n_parties = length(german_params$large_parties) + length(german_params$small_parties),
-  n_small_parties = length(german_params$small_parties),
-  n_stronghold_districts = round(german_params$stronghold_ratio * 100) + 1,
-  stronghold_share = 0.15,  # Threshold for stronghold definition
-  national_swing_variance = german_params$swing_sd %>% round(2),  # Extracted German swing volatility
-  swing_concentration = 0.8,  # German elections show moderate swing concentration
-  district_noise_sd = 0.005,  # Moderate district-level noise for German scenario
-  stringsAsFactors = FALSE
-)
-
-
-cat("German parameters loaded:\n")
-cat("- Number of districts:", german_params$n_districts, "\n")
-cat("- Large parties:", paste(german_params$large_parties, collapse = ", "), "\n")
-cat("- Small parties:", paste(german_params$small_parties, collapse = ", "), "\n")
-cat("- Swing volatility (SD):", round(german_params$swing_sd, 3), "\n")
-cat("- Stronghold ratio:", round(german_params$stronghold_ratio, 3), "\n")
-
-param_grid <- rbind(param_grid, german_scenario)
 
 # Helper: generate baseline shares with small party strongholds
-make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts) {
+make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts, between_district_vote_volatility) {
   n_large_parties <- n_parties - n_small_parties
   
   # Large parties: more balanced support
@@ -69,7 +64,7 @@ make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_strongh
   }
   
   # Small parties: more realistic baseline (like German small parties)
-  small_baseline <- rep(0.15, n_small_parties)  # Increased from 0.12 to 0.15
+  small_baseline <- rep(0.10, n_small_parties)  # Increased from 0.12 to 0.15
   
   baseline_shares <- c(large_baseline, small_baseline)
   baseline_shares <- baseline_shares / sum(baseline_shares)  # Normalize
@@ -77,54 +72,24 @@ make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_strongh
   # Create district-specific baseline matrix
   baseline_matrix <- matrix(NA, nrow = n_districts, ncol = n_parties)
   
-  # Large parties: more variation around national baseline (vectorized)
-  if (n_large_parties > 0) {
-    baseline_matrix[, 1:n_large_parties] <- matrix(
-      rnorm(n_districts * n_large_parties, 
-            mean = rep(baseline_shares[1:n_large_parties], each = n_districts), 
-            sd = 0.08),  # Increased from 0.03 to 0.08 for more variation
-      nrow = n_districts, ncol = n_large_parties
+  # Make party matrix
+  baseline_matrix[, 1:n_parties] <- matrix(
+      rnorm(n_districts * n_parties, 
+            mean = rep(baseline_shares[1:n_parties], each = n_districts), 
+            sd = between_district_vote_volatility),  # Increased from 0.03 to 0.08 for more variation
+      nrow = n_districts, ncol = n_parties
     )
-  }
+    # Ensure that all values between 0 and 100
+    baseline_matrix[, 1:n_parties] <- pmax(pmin(baseline_matrix[, 1:n_parties], 0.9), 0.05)
   
-  # Small parties: strongholds + low support elsewhere (vectorized)
-  if (n_small_parties > 0) {
-    small_party_cols <- (n_large_parties + 1):n_parties
-    
-      # Check if this is the German scenario (using extracted parameters)
-  if (n_parties == length(german_params$large_parties) + length(german_params$small_parties) && 
-      n_small_parties == length(german_params$small_parties)) {
-    # German scenario: use extracted baseline ranges
-    small_baseline_mean <- mean(german_params$small_baseline_range)
-    small_baseline_sd <- (german_params$small_baseline_range[2] - german_params$small_baseline_range[1]) / 4
-    
-    baseline_matrix[, small_party_cols] <- rnorm(n_districts * n_small_parties, 
-                                                 mean = small_baseline_mean, 
-                                                 sd = small_baseline_sd) %>%
-      matrix(nrow = n_districts, ncol = n_small_parties)
-    
-    # Use extracted geographic patterns
-    for (p in small_party_cols) {
-      # Create gradual variation based on German patterns
-      geographic_factor <- rnorm(n_districts, mean = 1, sd = 0.3)
-      baseline_matrix[, p] <- baseline_matrix[, p] * pmax(geographic_factor, 0.3)
+    # colMeans(baseline_matrix)
+  
+    # Identify strongholds for each party
+    stronghold_districts <- matrix(NA, n_stronghold_districts, ncol = n_parties)
+    for (i in 1:n_parties) {
+      # Randomly select (potential) stronghold districts for this party
+      stronghold_districts[, i] <- sample(1:n_districts, n_stronghold_districts)
     }
-  } else {
-      # Artificial scenarios: more realistic small party support
-      baseline_matrix[, small_party_cols] <- 0.12  # Increased from 0.10 to 0.12
-      
-        # Add strongholds for each small party (more gradual variation)
-  for (p in small_party_cols) {
-    stronghold_districts <- sample(1:n_districts, n_stronghold_districts)
-    # More gradual stronghold effect (not extreme)
-    baseline_matrix[stronghold_districts, p] <- 0.10 + stronghold_share * 0.2  # More gradual increase
-    
-    # Add some gradual geographic variation (like real German parties)
-    geographic_variation <- rnorm(n_districts, mean = 1, sd = 0.15)
-    baseline_matrix[, p] <- baseline_matrix[, p] * pmax(geographic_variation, 0.7)
-      }
-    }
-  }
   
   # Normalize each district to sum to 1
   baseline_matrix <- t(apply(baseline_matrix, 1, function(x) x / sum(x)))
@@ -136,7 +101,7 @@ make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_strongh
     print(apply(baseline_matrix, 2, summary))
   }
   
-  list(baseline_matrix = baseline_matrix, baseline_shares = baseline_shares)
+  list(baseline_matrix = baseline_matrix, baseline_shares = baseline_shares, stronghold_districts)
 }
 
 # Helper: classify party size
@@ -149,97 +114,67 @@ party_size_class <- function(party_index, n_large_parties) {
 }
 
 # ========== 2. Simulation Function ==========
-simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_swing_variance, swing_concentration, district_noise_sd, n_districts) {
+simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_level_vote_variance, between_district_vote_volatility, n_districts, uniform_share) {
   # Generate training data (more elections with same parameters)
-  n_training_elections <- 4  # Number of historical elections to train on
+  n_elections <- 5  # Number of elections for training and testing
   
   # Generate training elections (historical data with same parameters)
   training_elections <- list()
-  for (election in 1:n_training_elections) {
+  for (election in 1:n_elections) {
     # Generate baseline for this training election (same parameters)
-    training_baseline_data <- make_baseline_with_strongholds(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts)
+    training_baseline_data <- make_baseline_with_strongholds(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts, between_district_vote_volatility)
     training_baseline_matrix <- training_baseline_data$baseline_matrix
     training_baseline_shares <- training_baseline_data$baseline_shares
+    training_stronghold_districts <- training_baseline_data$stronghold_districts
     colnames(training_baseline_matrix) <- paste0("P", 1:n_parties)
     
     # Generate national swing for training election
-    training_national_swing <- rnorm(n_parties, mean = 0, sd = national_swing_variance)
+    training_national_swing <- rnorm(n_parties, mean = 0, sd = national_level_vote_variance)
     
-    # Generate district-level swing with realistic variation
-    # Make district swings much smaller than national swing to preserve the relationship
-    district_swing_sd_large <- 0.001  # Reduced from 0.015 to 0.001
-    district_swing_sd_small <- 0.0005  # Reduced from 0.012 to 0.0005
-    training_district_swings <- matrix(0, nrow = n_districts, ncol = n_parties)
-    
-    n_large_parties <- n_parties - n_small_parties
-    if (n_large_parties > 0) {
-      training_district_swings[, 1:n_large_parties] <- matrix(
-        rnorm(n_districts * n_large_parties, 0, district_swing_sd_large),
-        nrow = n_districts, ncol = n_large_parties
-      )
-    }
-    if (n_small_parties > 0) {
-      small_party_cols <- (n_large_parties + 1):n_parties
-      training_district_swings[, small_party_cols] <- matrix(
-        rnorm(n_districts * n_small_parties, 0, district_swing_sd_small),
-        nrow = n_districts, ncol = n_small_parties
-      )
-    }
-    
-    # Apply proportional effects to training district-level swings (only in strongholds)
-    if (swing_concentration > 0) {
+    # Apply proportional effects to training district-level swings with distribution
+    # Create proportional effects as a distribution: strongholds get higher effects, non-strongholds get lower effects
+    # if (party_system_regionalization > 0) {  # Higher regionalization = more concentration
       for (i in 1:n_parties) {
         # Identify stronghold districts for this party (districts with high baseline)
-        stronghold_threshold <- quantile(training_baseline_matrix[, i], 0.8)  # Top 20% of districts
-        stronghold_districts <- which(training_baseline_matrix[, i] >= stronghold_threshold)
-        non_stronghold_districts <- which(training_baseline_matrix[, i] < stronghold_threshold)
         
-        # Apply proportional effects only to stronghold districts
-        if (length(stronghold_districts) > 0) {
-          training_district_swings[stronghold_districts, i] <- training_district_swings[stronghold_districts, i] * 
-            (1 + training_baseline_matrix[stronghold_districts, i] * swing_concentration * 5.0)  # Increased from 2.0 to 5.0
-        }
         
-        # Compensate in non-stronghold districts to maintain national swing
-        if (length(non_stronghold_districts) > 0) {
-          # Calculate how much the stronghold effect changed the national swing
-          stronghold_effect <- sum(training_district_swings[stronghold_districts, i]) - 
-            sum(training_district_swings[stronghold_districts, i] / (1 + training_baseline_matrix[stronghold_districts, i] * swing_concentration * 5.0))
-          
-          # Distribute the compensation across non-stronghold districts
-          compensation_per_district <- -stronghold_effect / length(non_stronghold_districts)
-          training_district_swings[non_stronghold_districts, i] <- training_district_swings[non_stronghold_districts, i] + compensation_per_district
-        }
+        # Assign higher baseline share in stronghold districts
+        training_baseline_matrix[training_stronghold_districts[, i], i] <- rnorm(n_stronghold_districts, 
+                                                               mean = stronghold_share, 
+                                                               sd = between_district_vote_volatility)
+        
+        # Ensure that all values between 0 and 100
+        training_baseline_matrix[, 1:n_parties] <- pmax(pmin(training_baseline_matrix[, 1:n_parties], 0.9), 0.05)
+        
       }
-    }
     
-        # True vote shares for training election - apply national swing with proportional effects
+    
+    # Normalize each district to sum to 1
+    training_baseline_matrix <- t(apply(training_baseline_matrix, 1, function(x) x / sum(x)))
+    
+    # True vote shares for training election - apply national swing with proportional effects
     # Start with baseline
     training_true_vote_shares <- training_baseline_matrix
     
-    # Apply national swing with uniform component + proportional effect
+    # Apply national swing with uniform component + district variation (proportional effects already applied to district swings)
     for (i in 1:n_parties) {
       # National swing for this party (same across all districts)
       national_swing_for_party <- training_national_swing[i]
       
       # Always apply uniform swing component
-      uniform_swing <- national_swing_for_party
-      
-      # Add proportional effect on top (can be 0 when swing_concentration = 0)
-      # proportional_component <- national_swing_for_party * training_baseline_matrix[, i] * swing_concentration
-      # total_swing_effect <- uniform_swing + proportional_component
-      
-      # Calculate the expected vote share after national swing
-      expected_vote_share <- training_baseline_matrix[, i] + uniform_swing
+      uniform_swing <- rnorm(n_districts, 
+                             mean = national_swing_for_party, 
+                             sd = between_district_vote_volatility)
       
       # Calculate the actual swing (difference between true and baseline)
-      actual_swing <- uniform_swing
       
-      # Use the district swings we already generated (with proportional effects applied)
-      district_variation <- training_district_swings[, i]
+      # Add proportional swing
+      proportional_swing <- (rnorm(n_districts, national_swing_for_party, between_district_vote_volatility) * 
+                               (training_baseline_matrix[, i]))
+      proportional_swing %>% mean
       
-      # Add district variation to the swing
-      actual_swing <- actual_swing + district_variation
+      actual_swing <- uniform_swing * (uniform_share) + proportional_swing * (1 - uniform_share)
+      
       
       # Calculate final vote share
       training_true_vote_shares[, i] <- training_baseline_matrix[, i] + actual_swing
@@ -247,40 +182,30 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
       # Debug: Check if national swing is being applied correctly
       if (i == 1) {  # Only for first party to avoid spam
         cat("Party", i, "national swing:", round(national_swing_for_party, 3), 
-            "total_swing_effect mean:", round(mean(total_swing_effect), 3),
             "actual_swing mean:", round(mean(actual_swing), 3), "\n")
       }
+      # }
+      
+      # Ensure non-negative and sum to 1
+      training_true_vote_shares <- t(apply(training_true_vote_shares, 1, function(x) pmax(x, 0)))
+      training_true_vote_shares <- t(apply(training_true_vote_shares, 1, function(x) x / sum(x)))
+      
+      training_elections[[election]] <- list(
+        baseline = training_baseline_shares,
+        baseline_matrix = training_baseline_matrix,
+        true_vote_shares = training_true_vote_shares,
+        national_swing = training_national_swing
+      )
     }
     
-    # Add final noise to make prediction task harder
-    training_random_noise <- matrix(rnorm(n_districts * n_parties, 0, 0.01), nrow = n_districts, ncol = n_parties)
-    training_true_vote_shares <- training_true_vote_shares + training_random_noise
     
-    # Ensure non-negative and sum to 1
-    training_true_vote_shares <- t(apply(training_true_vote_shares, 1, function(x) pmax(x, 0)))
-    training_true_vote_shares <- t(apply(training_true_vote_shares, 1, function(x) x / sum(x)))
+    }
     
-    training_elections[[election]] <- list(
-      baseline = training_baseline_shares,
-      baseline_matrix = training_baseline_matrix,
-      true_vote_shares = training_true_vote_shares,
-      national_swing = training_national_swing
-    )
-  }
-  
-  # Now generate the current election (same parameters, different realization)
-  n_large_parties <- n_parties - n_small_parties
-  
-  # Generate baseline for current election (slightly different from training)
-  baseline_data <- make_baseline_with_strongholds(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts)
-  baseline_matrix <- baseline_data$baseline_matrix
-  baseline_shares <- baseline_data$baseline_shares
-  
-  colnames(baseline_matrix) <- paste0("P", 1:n_parties)
+    
   
   # Train swing coefficients using regression formulas
   # Create long format training data with one row per district-party-election (vectorized)
-  training_data <- map_dfr(1:n_training_elections, function(election) {
+  training_data <- map_dfr(1:(n_elections-1), function(election) {
     election_data <- training_elections[[election]]
     
     # Vectorized operations for all districts and parties at once
@@ -292,181 +217,128 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
     district_indices <- rep(1:n_districts, each = n_parties)
     party_indices <- rep(1:n_parties, times = n_districts)
     
-
-
-    # Create the data frame
+    # Calculate n_large_parties for the training data
+    n_large_parties <- n_parties - n_small_parties
+    
+    # Calculate true swings
+    # true_swings <- (election_data$true_vote_shares %>% colMeans) - (election_data$baseline_matrix %>% colMeans)
+    
+    # Create the data frame with national-level swing variables
     tibble(
       election = election,
       district = district_indices,
       party = paste0("P", party_indices),
       baseline_share = baseline_matrix_long,
       true_share = true_shares_long,
+      # National-level variables for swing calculations
+      national_baseline_share = rep(election_data$baseline, n_districts),
+      national_swing = rep(election_data$national_swing, n_districts),
       is_small_party = party_indices > n_large_parties
-    ) %>% 
-    # Calculate the party level swing (which is the average difference between true and baseline and then add the sd)
-      group_by(party, election) %>% 
-      mutate(swing = mean(true_share - baseline_share) + rnorm(n_districts, 0, national_swing_variance)
-             ) %>% ungroup
+    ) 
     
   })
   
   training_data$diff <- training_data$true_share - training_data$baseline_share
+  
+  # Create pre-calculated swing variables with single coefficients using national-level data
+  training_data <- training_data %>%
+    mutate(
+      # Proportional swing: national_baseline_share * ((national_polling_share - national_baseline_share) / national_baseline_share)
+      proportional_swing = national_baseline_share * (1 + national_swing),
+      # Uniform swing: national_polling_share - national_baseline_share
+      uniform_swing = national_baseline_share + national_swing
+    )
+  
   # training_data %>% View
-  cor(dplyr::select(training_data, c(diff, swing)))
+  cor(dplyr::select(training_data, c(diff, national_swing)))
   
   # Debug: Check the relationship between swing and diff
-  cat("Correlation between diff and swing:", cor(training_data$diff, training_data$swing), "\n")
-  cat("Summary of swing:", summary(training_data$swing), "\n")
+  cat("Correlation between diff and actual_swing:", cor(training_data$diff, training_data$national_swing), "\n")
+  cat("Summary of actual_swing:", summary(training_data$national_swing), "\n")
   cat("Summary of diff:", summary(training_data$diff), "\n")
   cat("Summary of true_share:", summary(training_data$true_share), "\n")
   cat("Summary of baseline_share:", summary(training_data$baseline_share), "\n")
   
   # Check if the national swing is actually being used in the training data
   cat("National swings used in training data:\n")
-  for (election in 1:n_training_elections) {
+  for (election in 1:(n_elections - 1)) {
     cat("Election", election, ":", round(training_elections[[election]]$national_swing, 3), "\n")
   }
   
   
-  # Train uniform swing model: true_share ~ baseline_share + swing
-  uniform_model <- lm(true_share ~ baseline_share + swing, data = training_data)
+  # Train uniform swing model: national_actual_swing ~ uniform_swing (single coefficient)
+  uniform_model <- lm(true_share ~ uniform_swing, data = training_data)
   cat("Uniform model:\n")
   print(summary(uniform_model))
   
-  # Train proportional swing model: true_share ~ baseline_share * swing (interaction)
-  proportional_model <- lm(true_share ~ baseline_share * swing, data = training_data)
+  # Train proportional swing model: national_actual_swing ~ proportional_swing (single coefficient)
+  proportional_model <- lm(true_share ~ proportional_swing, data = training_data)
   cat("Proportional model:\n")
   print(summary(proportional_model))
+  
+  # Train mixed swing model: national_actual_swing ~ uniform_swing + proportional_swing
+  mixed_model <- lm(true_share ~ uniform_swing + proportional_swing, data = training_data)
+  cat("Mixed model:\n")
+  print(summary(mixed_model))
   
   # Extract coefficients for prediction
   uniform_coefficients <- coef(uniform_model)
   proportional_coefficients <- coef(proportional_model)
+  mixed_coefficients <- coef(mixed_model)
   
   # No estimation error - we train on data generated with same parameters
   # The models learn the true swing patterns from the training data
 
-  # Simulate swing with concentration parameter
-  # Base swing (uniform component)
-  national_swing <- rnorm(n_parties, mean = 0, sd = national_swing_variance)
   
-  # District-level swing (vectorized) - controlled by district_noise_sd parameter
-  # Make district swings much smaller than national swing to preserve the relationship
-  district_swing_sd_large <- district_noise_sd * 0.1  # Reduced from 1.5 to 0.1
-  district_swing_sd_small <- district_noise_sd * 0.05  # Reduced from 1.0 to 0.05
-  
-  district_swings <- matrix(0, nrow = n_districts, ncol = n_parties)
-  
-  # Large parties: more district variation
-  if (n_large_parties > 0) {
-    district_swings[, 1:n_large_parties] <- matrix(
-      rnorm(n_districts * n_large_parties, 0, district_swing_sd_large),
-      nrow = n_districts, ncol = n_large_parties
-    )
-  }
-  
-  # Small parties: moderate district variation
-  if (n_small_parties > 0) {
-    small_party_cols <- (n_large_parties + 1):n_parties
-    district_swings[, small_party_cols] <- matrix(
-      rnorm(n_districts * n_small_parties, 0, district_swing_sd_small),
-      nrow = n_districts, ncol = n_small_parties
-    )
-  }
-  
-  # Apply proportional effects to district-level swings (only in strongholds)
-    for (i in 1:n_parties) {
-      # Identify stronghold districts for this party (districts with high baseline)
-      stronghold_threshold <- quantile(baseline_matrix[, i], 0.8)  # Top 20% of districts
-      stronghold_districts <- which(baseline_matrix[, i] >= stronghold_threshold)
-      non_stronghold_districts <- which(baseline_matrix[, i] < stronghold_threshold)
-      
-      # Apply proportional effects only to stronghold districts
-      if (length(stronghold_districts) > 0) {
-        district_swings[stronghold_districts, i] <- district_swings[stronghold_districts, i] * 
-          (1 + baseline_matrix[stronghold_districts, i] * swing_concentration * 5.0)  # Increased from 2.0 to 5.0
-      }
-      
-      # Compensate in non-stronghold districts to maintain national swing
-      if (length(non_stronghold_districts) > 0) {
-        # Calculate how much the stronghold effect changed the national swing
-        stronghold_effect <- sum(district_swings[stronghold_districts, i]) - 
-          sum(district_swings[stronghold_districts, i] / (1 + baseline_matrix[stronghold_districts, i] * swing_concentration * 5.0))
-        
-        # Distribute the compensation across non-stronghold districts
-        compensation_per_district <- -stronghold_effect / length(non_stronghold_districts)
-        district_swings[non_stronghold_districts, i] <- district_swings[non_stronghold_districts, i] + compensation_per_district
-      }
-    }
-
-  # True vote shares - apply national swing and add district-level variation
-  # Start with baseline
-  true_vote_shares <- baseline_matrix
-  
-  # Apply national swing with uniform component + proportional effect
-  for (i in 1:n_parties) {
-    # National swing for this party (same across all districts)
-    national_swing_for_party <- national_swing[i]
-    
-    # Always apply uniform swing component
-    uniform_swing <- national_swing_for_party
-    
-    # Add proportional effect on top (can be 0 when swing_concentration = 0)
-    proportional_component <- national_swing_for_party * baseline_matrix[, i] * swing_concentration
-    total_swing_effect <- uniform_swing + proportional_component
-    
-          # Calculate the expected vote share after national swing
-      expected_vote_share <- baseline_matrix[, i] + total_swing_effect
-      
-      # Calculate the actual swing (difference between true and baseline)
-      actual_swing <- total_swing_effect
-      
-      # Use the district swings we already generated (with proportional effects applied)
-      district_variation <- district_swings[, i]
-      
-      # Add district variation to the swing
-      actual_swing <- actual_swing + district_variation
-      
-      # Calculate final vote share
-      true_vote_shares[, i] <- baseline_matrix[, i] + actual_swing
-  }
-  
-  # Add final noise to make prediction task harder
-  random_noise <- matrix(rnorm(n_districts * n_parties, 0, 0.01), nrow = n_districts, ncol = n_parties)
-  true_vote_shares <- true_vote_shares + random_noise
-  
-  # Ensure non-negative and sum to 1
-  true_vote_shares <- t(apply(true_vote_shares, 1, function(x) pmax(x, 0)))
-  true_vote_shares <- t(apply(true_vote_shares, 1, function(x) x / sum(x)))
-  
-  # Debug: Check swing and vote share distribution
-  if (TRUE) {  # Set to TRUE to debug
-    cat("Swing concentration:", swing_concentration, "\n")
-    cat("National swing:", round(national_swing, 3), "\n")
-    cat("District swings before proportional effects:\n")
-    print(summary(as.vector(district_swings)))
-    cat("District swings after proportional effects:\n")
-    print(summary(as.vector(district_swings)))
-    cat("True vote shares summary:\n")
-    print(apply(true_vote_shares, 2, summary))
-  }
 
   # Apply trained models to predict district-level vote shares
-  # Create prediction data for each district-party combination
-  pred_data <- expand.grid(
-    district = 1:n_districts,
-    party = 1:n_parties
-  ) %>%
+  # Create national-level polling data for prediction (noisy version of national true vote shares)?
+  
+  # Get test data
+  test_election <- training_elections[[n_elections]]
+  
+  # Vectorized operations for all districts and parties at once
+  # Convert matrices to vectors by rows (district-wise)
+  baseline_matrix_long <- as.vector(t(test_election$baseline_matrix))
+  true_shares_long <- as.vector(t(test_election$true_vote_shares))
+  
+  # Create indices for districts and parties (matching the vectorized order)
+  district_indices <- rep(1:n_districts, each = n_parties)
+  party_indices <- rep(1:n_parties, times = n_districts)
+  
+  # Calculate n_large_parties for the prediction data
+  n_large_parties <- n_parties - n_small_parties
+  
+  # Calculate true swings
+  # true_swings <- (election_data$true_vote_shares %>% colMeans) - (election_data$baseline_matrix %>% colMeans)
+  
+  # Create the data frame with national-level swing variables
+  pred_data <- tibble(
+    election = n_elections,  # This is the test election
+    district = district_indices,
+    party = paste0("P", party_indices),
+    baseline_share = baseline_matrix_long,
+    true_share = true_shares_long,
+    # National-level variables for swing calculations
+    national_baseline_share = rep(test_election$baseline, n_districts),
+    national_swing = rep(test_election$national_swing, n_districts),
+    is_small_party = party_indices > n_large_parties
+  ) 
+  pred_data$diff <- pred_data$true_share - pred_data$baseline_share
+  
+  # Create pre-calculated swing variables with single coefficients using national-level data
+  pred_data <- pred_data %>%
     mutate(
-      # Use same ordering as training data (transpose first)
-      baseline_share = as.vector(t(baseline_matrix)),
-      true_share = as.vector(t(true_vote_shares)),
-      # Use the actual national swing that was used to generate the data
-      swing = rep(national_swing, each = n_districts)
+      # Proportional swing: national_baseline_share * ((national_polling_share - national_baseline_share) / national_baseline_share)
+      proportional_swing = national_baseline_share * (1 + national_swing),
+      # Uniform swing: national_polling_share - national_baseline_share
+      uniform_swing = national_baseline_share + national_swing
     )
   
-  # Predict using trained models
+  # Predict swing using trained models
   pred_data$uniform_pred <- predict(uniform_model, newdata = pred_data)
   pred_data$proportional_pred <- predict(proportional_model, newdata = pred_data)
+  pred_data$mixed_pred <- predict(mixed_model, newdata = pred_data)
   
   # Reshape back to district × party matrices
   # pred_uniform <- matrix(pred_data$uniform_pred, nrow = n_districts, ncol = n_parties, byrow = TRUE)
@@ -477,33 +349,26 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
     group_by(district) %>%
     mutate(
       uniform_pred = pmax(uniform_pred, 0),
-      proportional_pred = pmax(proportional_pred, 0)
+      proportional_pred = pmax(proportional_pred, 0),
+      mixed_pred = pmax(mixed_pred, 0)
     ) %>%
     ungroup() %>%
-    dplyr::select(district, party, uniform_pred, proportional_pred, swing, true_share, baseline_share)
+    dplyr::select(district, party, uniform_pred, proportional_pred, mixed_pred, national_swing, true_share, baseline_share)
 
-  # Calculate accuracy by predicting district winners
-  results <- tibble(
-    district = pred_data$district,
-    party = paste0("P", pred_data$party),
-    true = pred_data$true_share,
-    uniform = pred_data$uniform_pred,
-    proportional = pred_data$proportional_pred,
-    swing = pred_data$swing,
-    baseline = pred_data$baseline_share
-  )
   
   # For each district, determine winner and predictions
-  district_results <- results %>%
+  district_results <- pred_data %>%
     group_by(district) %>%
     mutate(
       # Handle ties by taking the first party with max vote share
       # Add safety check for cases where all vote shares are zero
-      true_winner = ifelse(all(true <= 0), party[1], party[which.max(true)]),
-      uniform_winner = ifelse(all(uniform <= 0), party[1], party[which.max(uniform)]),
-      proportional_winner = ifelse(all(proportional <= 0), party[1], party[which.max(proportional)]),
+      true_winner = ifelse(all(true_share <= 0), party[1], party[which.max(true_share)]),
+      uniform_winner = ifelse(all(uniform_pred <= 0), party[1], party[which.max(uniform_pred)]),
+      proportional_winner = ifelse(all(proportional_pred <= 0), party[1], party[which.max(proportional_pred)]),
+      mixed_winner = ifelse(all(mixed_pred <= 0), party[1], party[which.max(mixed_pred)]),
       uniform_correct = (uniform_winner == true_winner),
-      proportional_correct = (proportional_winner == true_winner)
+      proportional_correct = (proportional_winner == true_winner),
+      mixed_correct = (mixed_winner == true_winner)
     ) %>%
     ungroup() %>% filter(party == true_winner)
   
@@ -516,13 +381,17 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
   cat("Model prediction comparison:\n")
   cat("Uniform correct:", sum(district_results$uniform_correct), "/", nrow(district_results), "\n")
   cat("Proportional correct:", sum(district_results$proportional_correct), "/", nrow(district_results), "\n")
-  cat("Same predictions:", sum(district_results$uniform_correct == district_results$proportional_correct), "/", nrow(district_results), "\n")
+  cat("Mixed correct:", sum(district_results$mixed_correct), "/", nrow(district_results), "\n")
+  cat("Same predictions (Uniform vs Proportional):", sum(district_results$uniform_correct == district_results$proportional_correct), "/", nrow(district_results), "\n")
+  cat("Same predictions (Uniform vs Mixed):", sum(district_results$uniform_correct == district_results$mixed_correct), "/", nrow(district_results), "\n")
+  cat("Same predictions (Proportional vs Mixed):", sum(district_results$proportional_correct == district_results$mixed_correct), "/", nrow(district_results), "\n")
   
   # Calculate accuracy at scenario level
   scenario_accuracy <- district_results %>%
     summarize(
       accuracy_uniform = mean(uniform_correct, na.rm = TRUE),
       accuracy_proportional = mean(proportional_correct, na.rm = TRUE),
+      accuracy_mixed = mean(mixed_correct, na.rm = TRUE),
       n_districts = n_distinct(district)
     ) %>%
     mutate(
@@ -531,21 +400,25 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
   
   # Calculate MAE and RMSE for vote share predictions
   # We need to get all predictions, not just winners
-  all_predictions <- results %>%
+  all_predictions <- pred_data %>%
     group_by(district) %>%
     mutate(
       # Calculate MAE and RMSE for each district
-      mae_uniform = mean(abs(uniform - true), na.rm = TRUE),
-      mae_proportional = mean(abs(proportional - true), na.rm = TRUE),
-      rmse_uniform = sqrt(mean((uniform - true)^2, na.rm = TRUE)),
-      rmse_proportional = sqrt(mean((proportional - true)^2, na.rm = TRUE))
+      mae_uniform = mean(abs(uniform_pred - true_share), na.rm = TRUE),
+      mae_proportional = mean(abs(proportional_pred - true_share), na.rm = TRUE),
+      mae_mixed = mean(abs(mixed_pred - true_share), na.rm = TRUE),
+      rmse_uniform = sqrt(mean((uniform_pred - true_share)^2, na.rm = TRUE)),
+      rmse_proportional = sqrt(mean((proportional_pred - true_share)^2, na.rm = TRUE)),
+      rmse_mixed = sqrt(mean((mixed_pred - true_share)^2, na.rm = TRUE))
     ) %>%
     ungroup() %>%
     summarize(
       mae_uniform = mean(mae_uniform, na.rm = TRUE),
       mae_proportional = mean(mae_proportional, na.rm = TRUE),
+      mae_mixed = mean(mae_mixed, na.rm = TRUE),
       rmse_uniform = mean(rmse_uniform, na.rm = TRUE),
-      rmse_proportional = mean(rmse_proportional, na.rm = TRUE)
+      rmse_proportional = mean(rmse_proportional, na.rm = TRUE),
+      rmse_mixed = mean(rmse_mixed, na.rm = TRUE)
     )
   
   # Combine accuracy and error metrics
@@ -554,7 +427,7 @@ simulate_election <- function(n_parties, n_small_parties, n_stronghold_districts
   scenario_accuracy
 }
 
-# simulate_election(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_swing_variance, swing_concentration, district_noise_sd, n_districts)
+  # simulate_election(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_level_vote_variance, party_system_nationalization, between_district_vote_volatility, n_districts)
 
 
   # ========== 3. Run Simulations (Vectorized) ==========
@@ -580,16 +453,11 @@ with_progress({
   
   scenario_results <- map_dfr(1:n_sim_per_scenario, ~simulate_election(
     params$n_parties, params$n_small_parties, params$n_stronghold_districts, 
-    params$stronghold_share, params$national_swing_variance, params$swing_concentration, params$district_noise_sd, n_districts
+    params$stronghold_share, params$national_level_vote_variance, params$between_district_vote_volatility, n_districts, params$uniform_share
   ))
   
   # Add scenario identifier
-  scenario_type <- if (params$n_parties == length(german_params$large_parties) + length(german_params$small_parties) && 
-                       params$n_small_parties == length(german_params$small_parties)) {
-    "German (Realistic)"
-  } else {
-    "Artificial"
-  }
+  scenario_type <- "Artificial"
   
   scenario_results %>%
     mutate(
@@ -597,9 +465,9 @@ with_progress({
       n_small_parties = params$n_small_parties,
       n_stronghold_districts = params$n_stronghold_districts,
       stronghold_share = params$stronghold_share,
-      national_swing_variance = params$national_swing_variance,
-      swing_concentration = params$swing_concentration,
-      district_noise_sd = params$district_noise_sd,
+      national_level_vote_variance = params$national_level_vote_variance,
+      uniform_share = params$uniform_share,
+      between_district_vote_volatility = params$between_district_vote_volatility,
       scenario_type = scenario_type
     )
   }, .options = furrr_options(seed = TRUE))
@@ -611,14 +479,17 @@ plan(sequential)
 
 # ========== 4. Aggregate and Summarize ==========
 summary_results <- all_results_df %>%
-  group_by(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_swing_variance, swing_concentration, district_noise_sd, scenario_type) %>%
+  group_by(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_level_vote_variance, uniform_share, between_district_vote_volatility, scenario_type) %>%
   summarize(
     accuracy_uniform = mean(accuracy_uniform),
     accuracy_proportional = mean(accuracy_proportional),
+    accuracy_mixed = mean(accuracy_mixed),
     mae_uniform = mean(mae_uniform),
     mae_proportional = mean(mae_proportional),
+    mae_mixed = mean(mae_mixed),
     rmse_uniform = mean(rmse_uniform),
     rmse_proportional = mean(rmse_proportional),
+    rmse_mixed = mean(rmse_mixed),
     n_simulations = n(),
     .groups = "drop"
   )
@@ -626,15 +497,10 @@ summary_results <- all_results_df %>%
 print(summary_results)
 
 # ========== 5. Visualize ==========
+
+# Accuracy summaries
 results_long <- summary_results %>%
   pivot_longer(cols = starts_with("accuracy"), names_to = "model", values_to = "accuracy")
-
-# Add a flag to identify German scenario
-results_long <- results_long %>%
-  mutate(
-    is_german = (n_parties == 7 & n_small_parties == 5 & n_stronghold_districts == 30 & stronghold_share == 0.15)
-  )
-
 
 results_long %>% 
   group_by(model) %>% 
@@ -644,9 +510,34 @@ results_long %>%
     n_scenarios = n()
   ) 
 
+# MAE summaries
+results_long <- summary_results %>%
+  pivot_longer(cols = starts_with("mae"), names_to = "model", values_to = "mae")
+
+results_long %>%
+  group_by(model) %>% 
+  summarize(
+    avg_mae = mean(mae),
+    sd_mae = sd(mae),
+    n_scenarios = n()
+  )
+
+# RMSE summaries
+results_long <- summary_results %>%
+  pivot_longer(cols = starts_with("rmse"), names_to = "model", values_to = "rmse")
+
+results_long %>%
+  group_by(model) %>% 
+  summarize(
+    avg_rmse = mean(rmse),
+    sd_rmse = sd(rmse),
+    n_scenarios = n()
+  )
+
+
 # Create heatmap showing when each model performs better
 model_comparison <- summary_results %>%
-  group_by(n_parties, n_small_parties, swing_concentration, district_noise_sd) %>%
+  group_by(n_parties, n_small_parties, uniform_share, between_district_vote_volatility) %>%
   summarize(
     uniform_accuracy = mean(accuracy_uniform),
     proportional_accuracy = mean(accuracy_proportional),
@@ -666,16 +557,16 @@ param_grid_viz <- param_grid %>%
     # Create a unique scenario ID
     scenario_id = row_number(),
     # Create a categorical variable for visualization
-    param_combo = paste0("P", n_parties, "_S", n_small_parties, "_C", swing_concentration)
+    param_combo = paste0("P", n_parties, "_S", n_small_parties, "_U", uniform_share)
   )
 
 # Plot 0: Parameter grid structure
 p0 <- ggplot(param_grid_viz, aes(x = n_parties, y = n_small_parties, 
-                                 color = factor(swing_concentration), 
-                                 size = district_noise_sd)) +
+                                 color = factor(uniform_share), 
+                                 size = between_district_vote_volatility)) +
   geom_point(alpha = 0.7) +
-  scale_color_brewer(palette = "Set1", name = "Swing\nConcentration") +
-  scale_size_continuous(name = "District\nNoise SD", range = c(2, 6)) +
+  scale_color_brewer(palette = "Set1", name = "Uniform Share") +
+  scale_size_continuous(name = "Between-District\nVote Volatility", range = c(2, 6)) +
   labs(
     title = "Parameter Grid Structure",
     subtitle = "Each point represents a scenario combination",
@@ -686,16 +577,6 @@ p0 <- ggplot(param_grid_viz, aes(x = n_parties, y = n_small_parties,
   ) +
   theme_minimal() +
   theme(legend.position = "right")
-
-# Add text annotations for key parameter ranges
-# p0 <- p0 + 
-#   annotate("text", x = 4, y = max(param_grid$n_small_parties) - 0.5,
-#            label = paste("Parameter Ranges:\n",
-#                         "• Parties:", min(param_grid$n_parties), "-", max(param_grid$n_parties), "\n",
-#                         "• Small Parties:", min(param_grid$n_small_parties), "-", max(param_grid$n_small_parties), "\n",
-#                         "• Swing Concentration:", paste(range(param_grid$swing_concentration), collapse = "-"), "\n",
-#                         "• District Noise SD:", paste(range(param_grid$district_noise_sd), collapse = "-")),
-#            hjust = 1, vjust = 1, size = 3, color = "gray30")
 
 # Save plot 0
 ggsave("figures/01_parameter_grid.png", p0, width = 6, height = 4, dpi = 300)
@@ -734,7 +615,7 @@ ggsave("figures/02_model_performance_heatmap.pdf", p1, width = 6, height = 4)
 print(p1)
 
 # Plot 2: Accuracy difference by swing concentration and district noise
-p2 <- ggplot(model_comparison, aes(x = swing_concentration, y = district_noise_sd, fill = accuracy_diff)) +
+  p2 <- ggplot(model_comparison, aes(x = uniform_share, y = between_district_vote_volatility, fill = accuracy_diff)) +
   geom_tile() +
   scale_fill_gradient2(
     low = "#56B4E9",
@@ -751,17 +632,17 @@ p2 <- ggplot(model_comparison, aes(x = swing_concentration, y = district_noise_s
     )
   ) +
   labs(
-    title = "Effect of Swing Concentration and District Noise",
+    title = "Effect of Uniform Share and Between-District Vote Volatility",
     subtitle = "Blue = Proportional better, Orange = Uniform better",
-    x = "Swing Concentration", 
-    y = "District Noise SD"
+          x = "Uniform Share", 
+    y = "Between-District Vote Volatility"
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
 
 # Save plot 2
-ggsave("figures/03_swing_concentration_heatmap.png", p2, width = 6, height = 4, dpi = 300)
-ggsave("figures/03_swing_concentration_heatmap.pdf", p2, width = 6, height = 4)
+  ggsave("figures/03_uniform_share_heatmap.png", p2, width = 6, height = 4, dpi = 300)
+  ggsave("figures/03_uniform_share_heatmap.pdf", p2, width = 6, height = 4)
 print(p2)
 
 # Plot 3: Line plot showing the key interaction from regression
@@ -788,84 +669,6 @@ p3 <- ggplot(model_comparison, aes(
 ggsave("figures/04_key_interaction.png", p3, width = 6, height = 4, dpi = 300)
 ggsave("figures/04_key_interaction.pdf", p3, width = 6, height = 4)
 print(p3)
-
-# Plot 2: Simple density plot with lines
-ggplot(results_long, aes(x = accuracy, color = model)) +
-  geom_density(size = 1) +
-  scale_color_manual(values = c("accuracy_uniform" = "#E69F00", "accuracy_proportional" = "#56B4E9"),
-                     labels = c("accuracy_uniform" = "Uniform", "accuracy_proportional" = "Proportional")) +
-  labs(title = "Accuracy distributions: Uniform vs Proportional",
-       x = "Accuracy (share of correctly predicted districts)",
-       y = "Density",
-       color = "Model") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-# Plot 3: Box plot comparing accuracy distributions
-ggplot(results_long, aes(x = model, y = accuracy, fill = model)) +
-  geom_boxplot(alpha = 0.7) +
-  scale_fill_manual(values = c("accuracy_uniform" = "#E69F00", "accuracy_proportional" = "#56B4E9")) +
-  scale_x_discrete(labels = c("accuracy_uniform" = "Uniform", "accuracy_proportional" = "Proportional")) +
-  labs(title = "Accuracy comparison: Uniform vs Proportional swing",
-       subtitle = "Box plot showing median, quartiles, and outliers",
-       y = "Accuracy (share of correctly predicted districts)",
-       x = "Model") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-# Focus on scenarios with many small parties
-many_small_party_results <- summary_results %>%
-  filter(n_small_parties >= 3) %>%
-  mutate(
-    proportional_better = accuracy_proportional > accuracy_uniform,
-    improvement = (accuracy_proportional - accuracy_uniform) / accuracy_uniform * 100
-  )
-
-# Check which scenarios favor proportional
-proportional_favorable <- summary_results %>%
-  mutate(
-    proportional_better = accuracy_proportional > accuracy_uniform,
-    performance_diff = accuracy_uniform - accuracy_proportional
-  ) %>%
-  filter(proportional_better == TRUE)
-
-uniform_favorable <- summary_results %>%
-  mutate(
-    uniform_better = accuracy_uniform > accuracy_proportional,
-    performance_diff = accuracy_uniform - accuracy_proportional
-  ) %>%
-  filter(uniform_better == TRUE)
-
-print("Summary of when proportional wins:")
-print(proportional_favorable %>%
-  summarize(
-    n_scenarios = n(),
-    avg_n_small_parties = mean(n_small_parties),
-    avg_national_swing_variance = mean(national_swing_variance),
-    avg_stronghold_share = mean(stronghold_share)
-  ))
-
-print("Scenarios where uniform wins:")
-print(uniform_favorable %>%
-  summarize(
-    n_scenarios = n(),
-    avg_n_small_parties = mean(n_small_parties),
-    avg_national_swing_variance = mean(national_swing_variance),
-    avg_stronghold_share = mean(stronghold_share)
-  ))
-
-
-# Analyze by swing concentration
-print("Performance by swing concentration:")
-summary_results %>%
-  group_by(swing_concentration) %>%
-  summarize(
-    avg_accuracy_uniform = mean(accuracy_uniform),
-    avg_accuracy_proportional = mean(accuracy_proportional),
-    avg_performance_diff = mean(accuracy_uniform - accuracy_proportional),
-    n_scenarios = n()
-  ) %>%
-  print()
 
 
 # ========== 6. Regression Analysis ==========
@@ -901,27 +704,27 @@ regression_data <- summary_results %>%
     stronghold_ratio = n_stronghold_districts / n_districts,  # Proportion of stronghold districts
     
     # Handle log of zero or negative values by adding small constant
-    log_national_swing_variance = log(national_swing_variance + 1e-1),
-    log_district_noise = log(district_noise_sd + 1e-1),
+    log_national_level_vote_variance = log(national_level_vote_variance + 1e-1),
+    log_between_district_vote_volatility = log(between_district_vote_volatility + 1e-1),
     log_n_parties = log(n_parties + 1e-1),
     log_n_small_parties = log(n_small_parties + 1e-1),
     
     # Interaction terms
     small_stronghold_ratio = log_n_small_parties * stronghold_ratio,
-    small_swing = log_n_small_parties * log_national_swing_variance,
-    concentration_effect = swing_concentration * log_n_small_parties,  # Interaction of swing concentration and small parties
-    noise_effect = district_noise_sd * swing_concentration  # Interaction of district noise and swing concentration
+    small_swing = log_n_small_parties * log_national_level_vote_variance,
+    uniform_effect = uniform_share * log_n_small_parties,  # Interaction of uniform share and small parties
+    volatility_effect = between_district_vote_volatility * uniform_share  # Interaction of between-district volatility and uniform share
   ) %>%
   # Remove any rows with NA, NaN, or Inf values
   filter(!is.na(performance_diff) & !is.infinite(performance_diff),
          !is.na(mae_diff) & !is.infinite(mae_diff),
          !is.na(rmse_diff) & !is.infinite(rmse_diff),
-         !is.na(log_national_swing_variance) & !is.infinite(log_national_swing_variance),
-         !is.na(log_district_noise) & !is.infinite(log_district_noise),
+         !is.na(log_national_level_vote_variance) & !is.infinite(log_national_level_vote_variance),
+         !is.na(log_between_district_vote_volatility) & !is.infinite(log_between_district_vote_volatility),
          !is.na(log_n_parties) & !is.infinite(log_n_parties),
          !is.na(log_n_small_parties) & !is.infinite(log_n_small_parties))
 
-# (n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_swing_variance, swing_concentration, district_noise_sd, n_districts
+# (n_parties, n_small_parties, n_stronghold_districts, stronghold_share, national_level_vote_variance, between_district_vote_volatility, n_districts, uniform_share
 
 # Check data quality before regression
 cat("Data quality check:\n")
@@ -934,32 +737,25 @@ cat("\nChecking for remaining NA/Inf values:\n")
 cat("NA in performance_diff:", sum(is.na(regression_data$performance_diff)), "\n")
 cat("NA in mae_diff:", sum(is.na(regression_data$mae_diff)), "\n")
 cat("NA in rmse_diff:", sum(is.na(regression_data$rmse_diff)), "\n")
-cat("NA in log_national_swing_variance:", sum(is.na(regression_data$log_national_swing_variance)), "\n")
+cat("NA in log_national_level_vote_variance:", sum(is.na(regression_data$log_national_level_vote_variance)), "\n")
 
 # Main regression: What explains the accuracy difference?
-model1 <- lm(performance_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_swing_variance + 
-             swing_concentration + log_district_noise + small_stronghold_ratio, data = regression_data)
+model1 <- lm(performance_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_level_vote_variance +
+             uniform_share + log_between_district_vote_volatility + small_stronghold_ratio, data = regression_data)
 
 print("Regression 1: Accuracy difference (uniform - proportional)")
 print(summary(model1))
 
-# Alternative: What explains relative accuracy improvement?
-model2 <- lm(relative_performance ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_swing_variance + 
-             swing_concentration + log_district_noise + small_stronghold_ratio, data = regression_data)
-
-print("Regression 2: Relative accuracy improvement (%)")
-print(summary(model2))
-
 # MAE difference regression
-model3 <- lm(mae_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_swing_variance + 
-             swing_concentration + log_district_noise + small_stronghold_ratio, data = regression_data)
+model3 <- lm(mae_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_level_vote_variance +
+             uniform_share + log_between_district_vote_volatility + small_stronghold_ratio, data = regression_data)
 
 print("Regression 3: MAE difference (uniform - proportional)")
 print(summary(model3))
 
 # RMSE difference regression
-model4 <- lm(rmse_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_swing_variance + 
-             swing_concentration + log_district_noise + small_stronghold_ratio, data = regression_data)
+model4 <- lm(rmse_diff ~ log_n_parties + log_n_small_parties + stronghold_ratio + log_national_level_vote_variance +
+             uniform_share + log_between_district_vote_volatility + small_stronghold_ratio, data = regression_data)
 
 print("Regression 4: RMSE difference (uniform - proportional)")
 print(summary(model4))
@@ -979,9 +775,9 @@ coef_data <- bind_rows(
       term == "log_n_parties" ~ "Log(Number of Parties)",
       term == "log_n_small_parties" ~ "Log(Number of Small Parties)",
       term == "stronghold_ratio" ~ "Stronghold Ratio",
-      term == "log_national_swing_variance" ~ "Log(National Swing Variance)",
-      term == "swing_concentration" ~ "Swing Concentration",
-      term == "log_district_noise" ~ "Log(District Noise)",
+      term == "log_national_level_vote_variance" ~ "Log(National Level Vote Variance)",
+          term == "uniform_share" ~ "Uniform Share",
+    term == "log_between_district_vote_volatility" ~ "Log(Between-District Vote Volatility)",
       term == "small_stronghold_ratio" ~ "Small Party Stronghold Ratio",
       TRUE ~ term
     ),
@@ -1025,13 +821,97 @@ ggsave("figures/05_regression_coefficients.png", p4, width = 6, height = 4, dpi 
 ggsave("figures/05_regression_coefficients.pdf", p4, width = 6, height = 4)
 print(p4)
 
+# First Difference Plots (using existing regression results)
+cat("\n=== FIRST DIFFERENCE PLOTS ===\n")
+
+# Calculate variable ranges for first differences
+variable_ranges <- summary_results %>%
+  summarize(
+    log_n_parties = max(log(n_parties)) - min(log(n_parties)),
+    log_n_small_parties = max(log(n_small_parties + 1)) - min(log(n_small_parties + 1)),
+    stronghold_ratio = max(stronghold_share) - min(stronghold_share),
+    log_national_level_vote_variance = max(log(national_level_vote_variance)) - min(log(national_level_vote_variance)),
+    uniform_share = max(uniform_share) - min(uniform_share),
+    log_between_district_vote_volatility = max(log(between_district_vote_volatility)) - min(log(between_district_vote_volatility)),
+    small_stronghold_ratio = max(stronghold_share * (n_small_parties / n_parties)) - min(stronghold_share * (n_small_parties / n_parties))
+  ) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "range")
+
+# Calculate first differences for each model
+first_diff_data <- bind_rows(
+  # Model 1: Accuracy difference
+  data.frame(
+    model = "Accuracy Difference (Uniform - Proportional)",
+    variable = variable_ranges$variable,
+    first_diff = coef(model1)[variable_ranges$variable] * variable_ranges$range,
+    coefficient = coef(model1)[variable_ranges$variable],
+    range = variable_ranges$range
+  ),
+  # Model 3: MAE difference  
+  data.frame(
+    model = "MAE Difference (Uniform - Proportional)",
+    variable = variable_ranges$variable,
+    first_diff = coef(model3)[variable_ranges$variable] * variable_ranges$range,
+    coefficient = coef(model3)[variable_ranges$variable],
+    range = variable_ranges$range
+  ),
+  # Model 4: RMSE difference
+  data.frame(
+    model = "RMSE Difference (Uniform - Proportional)",
+    variable = variable_ranges$variable,
+    first_diff = coef(model4)[variable_ranges$variable] * variable_ranges$range,
+    coefficient = coef(model4)[variable_ranges$variable],
+    range = variable_ranges$range
+  )
+) %>%
+  mutate(
+    variable_clean = case_when(
+      variable == "log_n_parties" ~ "Number of Parties (log)",
+      variable == "log_n_small_parties" ~ "Number of Small Parties (log)",
+      variable == "stronghold_ratio" ~ "Stronghold Share",
+      variable == "log_national_level_vote_variance" ~ "National Vote Variance (log)",
+      variable == "uniform_share" ~ "Uniform Share",
+      variable == "log_between_district_vote_volatility" ~ "District Vote Volatility (log)",
+      variable == "small_stronghold_ratio" ~ "Small Party Stronghold Ratio"
+    )
+  )
+
+# Plot first differences
+first_diff_plot <- ggplot(first_diff_data, aes(x = variable_clean, y = first_diff, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", first_diff)), 
+            position = position_dodge(width = 0.7), vjust = -0.5, size = 3) +
+  labs(title = "First Differences: Actual Impact on Model Performance",
+       subtitle = "Shows the actual change in performance when moving from min to max of each variable",
+       x = "Predictor Variables",
+       y = "First Difference (Actual Performance Change)",
+       fill = "Performance Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  scale_fill_brewer(palette = "Set2") +
+  coord_flip()
+
+print(first_diff_plot)
+ggsave("figures/06_first_differences.pdf", first_diff_plot, width = 12, height = 8)
+ggsave("figures/06_first_differences.png", first_diff_plot, width = 12, height = 8)
+cat("✓ First differences plot saved to figures/06_first_differences.pdf and .png\n")
+
+# Summary table of first differences
+cat("\nFirst Differences Summary:\n")
+first_diff_summary <- first_diff_data %>%
+  group_by(model) %>%
+  arrange(desc(abs(first_diff))) %>%
+  dplyr::select(model, variable_clean, first_diff, coefficient, range)
+print(first_diff_summary)
+
 # Separate regressions by number of small parties
 few_small_data <- regression_data %>% filter(n_small_parties <= 2)
 many_small_data <- regression_data %>% filter(n_small_parties >= 3)
 
-model_few_small <- lm(performance_diff ~ stronghold_ratio + log_national_swing_variance, 
+model_few_small <- lm(performance_diff ~ stronghold_ratio + log_national_level_vote_variance,
                       data = few_small_data)
-model_many_small <- lm(performance_diff ~ stronghold_ratio + log_national_swing_variance, 
+model_many_small <- lm(performance_diff ~ stronghold_ratio + log_national_level_vote_variance,
                        data = many_small_data)
 
 print("Regression 3: Few small parties (≤2)")
@@ -1078,7 +958,7 @@ regression_data %>%
 
 cat("\n3. Effect of swing volatility:\n")
 regression_data %>%
-  group_by(national_swing_variance) %>%
+  group_by(national_level_vote_variance) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
     avg_mae_diff = mean(mae_diff),
@@ -1095,7 +975,7 @@ regression_data %>%
 
 cat("\n4. Effect of district noise:\n")
 regression_data %>%
-  group_by(district_noise_sd) %>%
+  group_by(between_district_vote_volatility) %>%
   summarize(
     avg_accuracy_diff = mean(performance_diff),
     avg_mae_diff = mean(mae_diff),
@@ -1118,7 +998,7 @@ empirical_results <- read.csv("data/out/eval_aggregate.csv")
 empirical_uniform <- empirical_results$avg_accuracy_winner[empirical_results$name == "uniform"]
 empirical_proportional <- empirical_results$avg_accuracy_winner[empirical_results$name == "proportional second vote"]
 
-cat("Empirical German Results (", german_params$n_districts, " districts, 8 elections):\n")
+cat("Empirical German Results (299 districts, 8 elections):\n")
 cat("- Uniform swing accuracy:", round(empirical_uniform, 3), "\n")
 cat("- Proportional swing accuracy:", round(empirical_proportional, 3), "\n")
 cat("- Difference (Proportional - Uniform):", round(empirical_proportional - empirical_uniform, 3), "\n")
@@ -1185,6 +1065,8 @@ write.csv(model_comparison, "data/out/model_comparison.csv", row.names = FALSE)
 saveRDS(model_comparison, "data/out/model_comparison.rds")
 
 cat("✓ Results saved to data/out/\n")
+
+
 
 # Create LaTeX tables using stargazer
 library(stargazer)
@@ -1273,7 +1155,7 @@ print(proportional_favorable %>%
   summarize(
     n_scenarios = n(),
     avg_n_small_parties = mean(n_small_parties),
-    avg_national_swing_variance = mean(national_swing_variance),
+    avg_national_level_vote_variance = mean(national_level_vote_variance),
     avg_stronghold_share = mean(stronghold_share)
   ))
 
@@ -1283,7 +1165,7 @@ print(uniform_favorable %>%
   summarize(
     n_scenarios = n(),
     avg_n_small_parties = mean(n_small_parties),
-    avg_national_swing_variance = mean(national_swing_variance),
+    avg_national_level_vote_variance = mean(national_level_vote_variance),
     avg_stronghold_share = mean(stronghold_share)
   ))
 

@@ -64,9 +64,18 @@ shapefile_info <- list(
 # ----------------------------------------------------------
 # Run the model and plot incorrect forecasts for each year
 
+# First, create the swing variables with single coefficients
+btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
+  mutate(
+    # Proportional swing with single coefficient
+    proportional_swing = res_l1_Z * proportional,
+    # Uniform swing with single coefficient  
+    uniform_swing = res_l1_Z + uniform
+  )
+
 # Define the formula for the "proportional both votes" model
 model_formula <- as.formula(
-  "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
+  "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
 )
 
 
@@ -105,7 +114,19 @@ for (i in seq_along(names(shapefile_info))) {
   # 3. Fit the model on the training data
   reg <- lm(model_formula, data = train)
   
-  # 4. Predict on the test data
+  # 4. Predict on the test data - handle factor level issues
+  # Convert all factor variables to numeric to avoid factor level issues
+  factor_vars <- c("formercand", "female", "incumbent", "akad", "incumbent_in_wkr", "east")
+  for (var in factor_vars) {
+    if (var %in% names(train)) {
+      train[[var]] <- as.numeric(as.character(train[[var]]))
+      test[[var]] <- as.numeric(as.character(test[[var]]))
+    }
+  }
+  
+  # Refit model with numeric variables
+  reg <- lm(model_formula, data = train)
+  
   test$predicted <- predict(reg, newdata = test)
   
   # 5. For each district, determine the predicted winner

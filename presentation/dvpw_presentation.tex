@@ -1,0 +1,425 @@
+%% LyX 2.2.1 created this file.  For more info, see http://www.lyx.org/.
+%% Do not edit unless you really know what you are doing.
+\documentclass[english]{beamer}
+\usepackage[T1]{fontenc}
+\usepackage[latin9]{inputenc}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+\usepackage{textcomp}
+\usepackage{graphicx}
+%\graphicspath{{./output/}}
+\usepackage[authoryear]{natbib}
+\setbeamertemplate{caption}[numbered]
+\usepackage{appendixnumberbeamer} % for additional appendix numbers
+\beamertemplatenavigationsymbolsempty % remove navigation symbols
+
+\usepackage[labelfont=bf, textfont = scriptsize]{caption}
+\usepackage{amsmath}
+\usepackage[scaled]{helvet}
+
+
+%% EURO Symbol
+\usepackage[official]{eurosym}  % euro symbol
+
+%% Subfigures
+\usepackage{subcaption}
+
+%% TABLES
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{amssymb}
+
+% custom table column with gray background
+%\usepackage{xcolor,colortbl}
+%\definecolor{Gray}{gray}{0.7}
+%\newcolumntype{G}{>{\columncolor{Gray}}c}
+
+
+%% === check mark
+%\usepackage{pifont}
+%\newcommand{\cmark}{\ding{51}}
+%\newcommand{\xmark}{\ding{55}}
+
+% Gray underline
+\newcommand{\light}[1]{\textcolor{gray}{#1}}
+
+% Define colors
+\definecolor{darkgreen}{rgb}{0.09, 0.60, 0.27}
+\definecolor{bluegray}{rgb}{0.325, 0.525, 0.725}
+%\definecolor{bluegraylight}{rgb}{0.475, 0.675, 0.875}
+%\definecolor{bluegraylighter}{rgb}{0.55, 0.75, 0.95}
+\definecolor{lightgray}{rgb}{0.91, 0.91, 0.91}
+\definecolor{darkgray}{rgb}{0.81, 0.81, 0.81}
+\definecolor{darkgrayer}{rgb}{0.2, 0.2, 0.2}
+
+\usetheme{CambridgeUS}
+\usecolortheme{beaver}
+\setbeamercolor*{palette tertiary}{bg=bluegray, fg = white}
+\setbeamercolor*{palette secondary}{bg=lightgray, fg = darkgrayer}
+\setbeamercolor*{palette primary}{bg=darkgray, fg = darkgrayer}
+\setbeamercolor{frametitle}{fg=bluegray,bg=lightgray}
+\setbeamercolor{title}{fg=bluegray,bg=white}
+
+%\usecolortheme{seahorse}
+%\usecolortheme{default}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Textclass specific LaTeX commands.
+ % this default might be overridden by plain title style
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% User specified LaTeX commands.
+% Packages for tables
+\usepackage{booktabs}% Pretty tables
+\usepackage{threeparttablex}% For Notes below table
+\usepackage{graphicx}
+\usepackage{tabularx}
+
+% omit table columns
+\usepackage{array}
+\newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+\newcolumntype{Z}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{\hspace*{-\tabcolsep}}}
+
+
+% For tick and cross marks
+\usepackage{pifont}
+
+% Commands for green checkmark and red cross
+\newcommand{\cmark}{\textcolor{darkgreen}{\ding{51}}} % Green checkmark
+\newcommand{\xmark}{\textcolor{red}{\ding{55}}}   % Red cross
+\newcommand{\cmarkparen}{\textcolor{darkgreen}{(\ding{51})}} % Green checkmark with parentheses
+
+
+
+\makeatother
+
+\usepackage{babel}
+
+\author[\textbf{Erfort} / Stoetzer]{
+\small
+\textbf{Cornelius Erfort}, \textit{Witten/Herdecke University} \\ \vspace{0.2cm}
+{Lukas F. Stoetzer}, \textit{Witten/Herdecke University} \\ \vspace{0.2cm}
+\vspace{-0.5cm}
+}
+
+\title[How Swing Model Assumptions Shape Vote-to-Seat Predictions]{How Swing Model Assumptions Shape Vote-to-Seat Predictions: Evidence from Recent German Elections}
+
+%\vspace*{0cm}
+ \date[{DVPW AK Wahlen 2025}]{
+	DVPW AK Wahlen 2025 \\ \vspace{1.25em}  
+	%\textit{Panel: Multinationals and Governments}\\  
+	% \vspace{0.25em} February 19, 2025\\\vspace{1.25em}
+	    {\footnotesize Supported by\\ \vspace{.5em} Deutsche Forschungsgemeinschaft (DFG \#529544178)} 
+}
+
+% font size of captions for whole document
+\setbeamerfont{caption}{size=\footnotesize} 
+
+\begin{document}
+
+
+\begin{frame}
+\maketitle	
+\end{frame}
+
+
+
+
+\section{Motivation}
+
+\frame{
+ \vspace{.4cm}
+\centering\fbox{\includegraphics[width=.9\textwidth]{../figures/accuracy.pdf}} \\
+    \scriptsize \\ \vspace{-.05cm}
+    % \flushright Source: Bundestag, Parlamentsfernsehen
+
+}
+
+\begin{frame}[t]{Swing Models in Electoral Forecasting}
+	
+
+
+\begin{itemize}\setlength\itemsep{0.8em}
+	\item \textbf{How do different swing assumptions affect electoral predictions?}
+	\begin{itemize}\setlength\itemsep{0.5em}
+		\item Extensive research on electoral forecasting {\textcolor{gray}{\scriptsize \citep{bafumi2006forecasting,fisher2011polls,hanretty2016combining}}} \pause
+		\item \textcolor{bluegray}{\bfseries Limited focus}: \pause (1) uniform vs. proportional swing comparison, \pause  (2) mixed-member proportional systems \pause and (3) systematic evaluation across parameter space \pause
+	\end{itemize}
+
+		\item[] \textbf{$\rightarrow$ \alert{3 Gaps}:}
+				\begin{itemize}\setlength\itemsep{0.3em}
+                \item[1.] When do different swing assumptions perform optimally?
+                \item[2.] How do party system characteristics affect model choice?
+                \item[3.] Empirical vs. theoretical insights \pause
+		% \item YYY \textbf{lacks} \textbf{ZZZZ} \pause and \textbf{OOO} \pause $\rightarrow$ XXX \alert{PPP},  but \textcolor{bluegray}{III}.
+		\end{itemize}
+		\pause
+\vspace*{0.25cm}
+	\item[$\rightarrow$] \textbf{Systematic evaluation of swing models} using \bfseries German electoral data \alert{\&} comprehensive simulation study.\pause
+		% \begin{itemize}\setlength\itemsep{0.5em}
+		% 	\item[] \textbf{RQ1}: \textit{How do lobbyists compare to the general population?}\pause
+		% 	\item[] \textbf{RQ2}: \textit{What predicts becoming a lobbyist in the first place?}
+		% \end{itemize}
+
+\end{itemize}
+
+
+\end{frame}
+
+\section{Theory \& German Context}
+
+\begin{frame}[t]{Swing Model Assumptions}
+\noindent \textcolor{bluegray}{\bfseries Two Dominant Approaches}
+    \begin{itemize}\setlength\itemsep{1em}
+		% \item<2->\textcolor{bluegray}{\bfseries Expertise vs. Connections}
+			\item<1-> \alert{\textbf{Uniform Swing}} $=$ \textit{Identical percentage-point shifts across all districts} {\textcolor{gray}{\scriptsize \citep{fisher2011polls}}}
+            \item[1.]<2-> \textbf{Proportional Swing} 
+            \begin{itemize}\setlength\itemsep{0.7em}
+            \item Vote shares change relative to baseline support levels {\textcolor{gray}{\scriptsize \citep{hanretty2016combining}}}
+            \end{itemize}
+			\item[2.]<3-> \textbf{Hybrid Approaches}
+                \begin{itemize}\setlength\itemsep{0.7em}
+                    \item Combine elements of both strategies {\textcolor{gray}{\scriptsize \citep{wilson2022models}}}
+                    \item Piecewise models allow different swing behavior above/below party averages
+                    \item Interaction models capture continuous relationships between baseline support and swing magnitude
+                \end{itemize}
+	% \item<6-> \alert{\textbf{Germany -- Institutional differences in comparison to U.S.}}
+	% 		\begin{itemize}\setlength\itemsep{0.6em}
+	% 	\item<7->[1.] \textbf{Role of federal ministries for legislation} $\rightarrow$ importance of previous \underline{experience in federal government}, rather than parliament 
+	% 	\item[8->[2.] \textbf{Public campaign finance system} $\rightarrow$ importance of \underline{personal connections} for access, rather than campaign contributions
+	% 	\item<9->[3.] \textbf{Mixed-member proportional representation} $\rightarrow$ importance of \underline{party connections}, rather than connections to individual legislators
+	% \end{itemize}
+	\end{itemize}
+\end{frame}
+
+\section*{Data}
+
+\begin{frame}{German Federal Election Data}
+
+\begin{itemize}\setlength\itemsep{1em}
+    \item<1->[1.] \textcolor{black}{\bfseries District-Level Election Results (1998-2025)}
+    \begin{itemize}\setlength\itemsep{0.25em}
+        \item 8 federal elections, 299 electoral districts
+        \item More than 20,000 observations
+        \item First votes (district representatives) and second votes (party lists)
+    \end{itemize}
+    \item<2->[2.] \textcolor{bluegray}{\bfseries \alert{Out-of-Sample Forecasting Framework}}
+    \begin{itemize}\setlength\itemsep{0.25em}
+        \item Train on 7 elections, predict the 8th
+        \item Rotate through all possible combinations
+        \item Mirrors real-world forecasting conditions
+    \end{itemize}
+    \item<3-> \textcolor{bluegray}{\bfseries Candidate and District Covariates}
+    \begin{itemize}\setlength\itemsep{0.25em}
+        \item Candidate characteristics: incumbency, gender, education, list position
+        \item District characteristics: East Germany, number of candidates
+        \item Historical performance: past vote shares, previous candidacies
+        \item \textit{Comprehensive control for systematic factors}
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Model Variants: Ten Distinct Specifications}
+
+\begin{table}[htbp]
+    \centering\small
+    \resizebox{0.9\textwidth}{!}{%
+    \begin{tabular}{p{3cm} p{6cm} p{5cm}}
+        \toprule
+        \textbf{Model Type} & \multicolumn{1}{c}{\textbf{Specification}} & \multicolumn{1}{c}{\textbf{Key Features}} \\
+        \midrule
+        \textbf{Proportional} & \texttt{proportional\_swing} + covariates & Past second vote share plus proportional change \\
+        \addlinespace\addlinespace
+        \textbf{Uniform} & \texttt{uniform\_swing} + covariates & Past second vote share plus uniform change \\
+        \addlinespace\addlinespace
+        \textbf{Mixed} & Both swing terms + covariates & Regression finds optimal balance \\
+        \addlinespace\addlinespace
+        \textbf{Piecewise} & Swing + interaction terms & Different effects above/below party average \\
+        \addlinespace\addlinespace
+        \textbf{Pure} & Only swing terms & No candidate/district covariates \\
+        \addlinespace\addlinespace
+        \textbf{Interaction} & Continuous interactions & \texttt{res\_l1\_Z*swing\_term} \\
+        \addlinespace\addlinespace
+        \textbf{No Adjustment} & All covariates, no swing & Baseline control model \\
+        \bottomrule
+    \end{tabular}
+    }
+    % \caption{Comparison of Registration Rules for Lobby Registers in Germany and the United States}
+    \label{tab:model_variants}
+\end{table}
+    
+\end{frame}
+
+\section{Results}
+
+\begin{frame}{Empirical Analyses}
+    \begin{enumerate}\setlength\itemsep{1.5em}
+        \item<1->[1.] \textbf{Model Performance}: Accuracy differences across swing assumptions
+        \begin{itemize}\setlength\itemsep{0.25em}
+            \item[a)] District winner prediction accuracy
+            \item[b)] Mean error of vote share predictions
+            \item[c)] Out-of-bounds predictions
+        \end{itemize}
+        % \item<2->[2.] \alert{\bfseries Cross-Sectional Analysis}: Predicting becoming a lobbyist.
+        \item<2->[2.] \textbf{\textcolor{bluegray}{Simulation Study}}: Systematic parameter space exploration
+        \begin{itemize}\setlength\itemsep{0.25em}
+            \item 20,251 unique scenario combinations
+            \item Party system characteristics
+            \item Electoral volatility effects
+        \end{itemize}
+        \end{enumerate}
+\end{frame}
+
+\begin{frame}[t]{Empirical Results: Model Performance}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1>[width=0.9\textwidth]{../figures/accuracy.pdf}%
+        \includegraphics<2>[width=0.9\textwidth]{../figures/mispredicted_results_connected_facets.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+\begin{itemize}
+    \item<2->[$\rightarrow$] \textbf{Small but meaningful differences}: Less than 1 percentage point between best (mixed) and worst (proportional piecewise) models. \pause \alert{Interaction terms} significantly reduce prediction errors.
+\end{itemize}
+    
+\end{frame}
+
+\begin{frame}[t]{Empirical Results: Out-of-Bounds Predictions}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1>[width=0.8\textwidth]{../figures/all_years_incorrect_forecasts.pdf}%
+        \includegraphics<2>[width=0.8\textwidth]{../figures/coefplot_correct_comparison_custom.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+\begin{itemize}
+    \item<2->[$\rightarrow$] \textbf{Regional clustering} of mispredicted districts suggests local factors not captured by national swing models. \pause \alert{Pure proportional models} perform worst on out-of-bounds predictions.
+\end{itemize}
+    
+\end{frame}
+
+\begin{frame}[t]{Simulation Results: Parameter Space Exploration}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1>[width=0.825\textwidth]{../figures/01_parameter_grid.pdf}%
+        \includegraphics<2>[width=0.825\textwidth]{../figures/04_key_interaction.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+\begin{itemize}
+    \item<2->[$\rightarrow$] \textbf{Key interaction}: Increasing parties favors uniform swing, but more small parties favors proportional swing. \pause \alert{Party system fragmentation} affects optimal model choice.
+\end{itemize}
+    
+\end{frame}
+
+\begin{frame}[t]{Simulation Results: First Differences Analysis}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1>[width=0.8\textwidth]{../figures/05_regression_coefficients.pdf}%
+        \includegraphics<2>[width=0.8\textwidth]{../figures/06_first_differences.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+\begin{itemize}
+    \item<2->[$\rightarrow$] \textbf{Standardized effects}: Uniform share parameter significantly increases uniform swing advantage. \pause \alert{Higher national variance} benefits proportional swing, \pause \alert{higher district volatility} favors uniform swing.
+\end{itemize}
+    
+\end{frame}
+
+\begin{frame}{Key Findings Summary}
+	
+	\begin{itemize}[<+->]\setlength\itemsep{1.5em}
+		\item \textbf{Empirical Analysis of German Elections}
+            \begin{itemize}\setlength\itemsep{0.5em}
+                \item Differences between swing models are generally small but meaningful \pause
+                \item Interaction terms significantly improve prediction accuracy and reduce out-of-bounds predictions \pause
+                \item Regional clustering suggests local factors remain important despite national trends
+            \end{itemize}
+            \item \textbf{Simulation Study Insights}
+            \begin{itemize}\setlength\itemsep{0.5em}
+                \item Uniform swing performs better with more parties and higher electoral volatility
+                \item Proportional swing performs better with many small parties
+                \item Party system characteristics systematically affect optimal model choice
+            \end{itemize}
+            \item \textbf{Contributions}:
+                \begin{itemize}\setlength\itemsep{0.5em}
+                \item[1.] Nuanced understanding of when different swing assumptions are most appropriate
+                \item[2.] Comprehensive evaluation framework for electoral forecasting across diverse contexts
+                \end{itemize}
+	\end{itemize}
+
+\end{frame}
+
+\begin{frame}
+\vspace*{1cm}
+	\centering \Huge Thank You \\ \vspace*{1cm}
+ \large \alert{\textbf{Cornelius Erfort}}: \href{cornelius.erfort@uni-wh.de}{cornelius.erfort@uni-wh.de} \\\vspace*{0.75cm}
+ \large \textbf{Lukas F. Stoetzer}: \href{lukas.stoetzer@uni-wh.de}{lukas.stoetzer@uni-wh.de} \\\vspace*{0.75cm}
+%	\large \textbf{Web}: \href{www.janstuckatz.com}{janstuckatz.com} \\
+\end{frame}	
+	
+
+
+\begin{frame}[allowframebreaks]{References} 
+	\footnotesize 
+	\bibliographystyle{apsr}
+	\bibliography{../references}
+\end{frame}
+
+
+
+
+\appendix
+\section{Appendix}
+
+\begin{frame}[t]{Additional Empirical Results}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1->[width=0.8\textwidth]{../figures/coefplot_error_comparison_custom.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+% \begin{itemize}
+%     \item<2->[$\rightarrow$] 
+% \end{itemize}
+    
+\end{frame}
+
+\begin{frame}[t]{Additional Simulation Results}
+
+% \vspace{-0.5cm}
+\begin{figure}[t]
+    \centering
+         \centering
+        \includegraphics<1->[width=0.8\textwidth]{../figures/02_model_performance_heatmap.pdf}%
+\end{figure}
+\vspace{-0.5cm}
+
+
+% \begin{itemize}
+%     \item<2->[$\rightarrow$] 
+% \end{itemize}
+    
+\end{frame}
+
+
+
+\end{document}

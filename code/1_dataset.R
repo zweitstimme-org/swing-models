@@ -103,11 +103,12 @@ federal_polls <- read.csv("data/germany-federal-polls.csv") %>% mutate(date = as
 
 # Optionally: add new polls (from web scraping or other sources)
 # new_polls <- get_wahlrecht_polls()
-add_polls <- pivot_longer(new_polls, cols = c(bsw, cdu, spd, gru, fdp, lin, afd), names_to = "party", values_to = "poll_share")
-add_polls <- filter(add_polls, date > max(federal_polls$date, na.rm = T))
+# add_polls <- pivot_longer(new_polls, cols = c(bsw, cdu, spd, gru, fdp, lin, afd), names_to = "party", values_to = "poll_share")
+# add_polls <- filter(add_polls, date > max(federal_polls$date, na.rm = T))
 
 # Combine old and new polls, standardize, and filter
-federal_polls <- bind_rows(federal_polls, add_polls) %>%
+# federal_polls <- bind_rows(federal_polls, add_polls) %>%
+federal_polls <- federal_polls %>%
   mutate(date = as.Date(date)) %>%
   filter(!is.na(poll_share)) %>% 
   mutate(poll_share = poll_share / 100)
@@ -159,9 +160,8 @@ federal_results <- federal_results %>%
 
 # Merge federal results into poll data, clean up columns
 federal_polls <- merge(federal_polls, federal_results, by = c("electiondate", "party"), all = T) %>% 
-  mutate(auftraggeber = coalesce(auftraggeber, institute)) %>%
   filter(!is.na(date) & !is.na(vote_share)) %>% 
-  dplyr::select(-c(id, ag, typ, reg, institute, sample_size, rnd, beg, end, meth, stat, stand)) %>% 
+  dplyr::select(-any_of(c("id", "ag", "typ", "reg", "sample_size", "rnd", "beg", "end", "meth", "stat", "stand"))) %>% 
   arrange(date)
 
 ###########################
@@ -264,12 +264,27 @@ btw_candidates_1983_2025 <- merge(btw_candidates_updated, federal_leads,
 
 
 ### Calculate swings -----------------------
-# Merge swing data (from swing_df) and calculate proportional/uniform swings
+# Create swing_df from federal_leads (this was missing)
+swing_df <- federal_leads %>% 
+  select(election, party, polls_days, polls_weeks, polls_months, vote_share_l1)
+
+# Merge swing data and calculate proportional/uniform swings
 btw_candidates_1983_2025 <- merge(btw_candidates_1983_2025, swing_df, 
                                   by = c("election", "party"), all.x = TRUE)
 
-btw_candidates_1983_2025$proportional <- (btw_candidates_1983_2025$polls_days / btw_candidates_1983_2025$vote_share_l1)
-btw_candidates_1983_2025$uniform <- (btw_candidates_1983_2025$polls_days - btw_candidates_1983_2025$vote_share_l1)
+# Calculate proportional swing (matching Lukas's approach)
+# Use the correct column names from the merge
+btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
+  mutate(
+    proportional = case_when(
+      !is.na(polls_days.x) & !is.na(vote_share_l1.x) & vote_share_l1.x > 0 ~ (polls_days.x - vote_share_l1.x) / vote_share_l1.x,
+      TRUE ~ NA_real_
+    ),
+    uniform = case_when(
+      !is.na(polls_days.x) & !is.na(vote_share_l1.x) ~ polls_days.x - vote_share_l1.x,
+      TRUE ~ NA_real_
+    )
+  )
 
 btw_candidates_1983_2025$res_l1_Z_uniform <- btw_candidates_1983_2025$res_l1_Z + btw_candidates_1983_2025$uniform
 

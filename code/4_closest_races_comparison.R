@@ -1,6 +1,7 @@
 # ========== Libraries ==========
 library(tidyverse)
 library(ggplot2)
+library(broom)
 library(dplyr)
 
 # ========== Source Utility Functions ==========
@@ -18,16 +19,28 @@ btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
          akad = ifelse(akad == 1, 1, 0)
          )
 
+# First, create the swing variables with single coefficients
+btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
+  mutate(
+    # Proportional swing with single coefficient
+    proportional_swing = res_l1_Z * proportional,
+    # Pure Uniform with single coefficient  
+    pure_uniform = res_l1_Z + uniform
+  )
+
 # ========== Define Models ==========
 # resp_E = candidate vote share (first vote/Erststimme)
 # resp_Z = party vote share (second vote/Zweitstimme)
 # l1 = lag (previous election results)
+
+
+
 model_formulas <- list(
-  proportional_both_votes = as.formula(
-    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E*proportional + res_l1_Z*proportional + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
+  pure_proportional = as.formula(
+    "resp_E ~ res_l1_E + proportional_swing"
   ),
-  uniform_swing = as.formula(
-    "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + uniform + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
+  pure_uniform = as.formula(
+    "resp_E ~ res_l1_E + pure_uniform"
   )
 )
 
@@ -116,7 +129,7 @@ for (year in years) {
 
   # Now, for example, get the top 5 closest (smallest absolute error) for each model
   top5_errors <- all_preds %>%
-    arrange(abs(error_proportional_both_votes)) %>%
+    arrange(abs(error_pure_proportional)) %>%
     mutate(year = year)
 
   # Or output all_preds as is
@@ -141,14 +154,7 @@ write_csv(final_results, "data/out/closest_races_comparison.csv")
 print(final_results) 
 
 
-## Save plot to pdf
-pdf(file = "figures/error-density.pdf", height = 6, width = 10)
-final_results$error_uniform_swing %>% density(na.rm = T) %>% plot(yli = c(0, 5), main = "Density of Errors")
-final_results$error_proportional_both_votes %>% density(na.rm = T) %>% lines(col= "red")
-dev.off()
-
-
-# Assuming all_preds has columns: error_proportional_both_votes, year, actual_winner, state
+# Assuming all_preds has columns: error_pure_proportional, year, actual_winner, state
 # You may need to join state info if not present
 
 # Combine all years for regression
@@ -161,32 +167,34 @@ for (model_name in names(model_formulas)) {
   all_errors[[correct_col]] <- all_errors[[winner_col]] == all_errors$actual_winner
 }
 
-all_errors$error_proportional_both_votes %>% summary
-all_errors$error_uniform_swing %>% summary
+all_errors$error_pure_proportional %>% summary
+all_errors$error_pure_uniform %>% summary
 
 # Linear regression for error
-lm_error <- lm(abs(error_proportional_both_votes) ~ factor(year) + actual_winner + land, data = all_errors)
-summary(lm_error)
+lm_error_prop <- lm(abs(error_pure_proportional) ~ factor(year) + actual_winner + land, data = all_errors)
+summary(lm_error_prop)
+lm_error_uniform <- lm(abs(error_pure_uniform) ~ factor(year) + actual_winner + land, data = all_errors)
+summary(lm_error_uniform)
 
 # Linear regression for mispredicted cases - both models
-lm_error_mispred_prop <- lm(abs(error_proportional_both_votes) ~ factor(year) + actual_winner + land, 
-                           data = all_errors %>% filter(actual_winner != winner_proportional_both_votes))
-lm_error_mispred_uniform <- lm(abs(error_uniform_swing) ~ factor(year) + actual_winner + land, 
-                              data = all_errors %>% filter(actual_winner != winner_uniform_swing))
+lm_error_mispred_prop <- lm(abs(error_pure_proportional) ~ factor(year) + actual_winner + land, 
+                           data = all_errors %>% filter(actual_winner != winner_pure_proportional))
+lm_error_mispred_uniform <- lm(abs(error_pure_uniform) ~ factor(year) + actual_winner + land, 
+                              data = all_errors %>% filter(actual_winner != winner_pure_uniform))
 
 # Logistic regression for correct prediction - both models
-glm_correct_prop <- glm(correct_proportional_both_votes ~ factor(year) + actual_winner + land, 
+glm_correct_prop <- glm(correct_pure_proportional ~ factor(year) + actual_winner + land, 
                         data = all_errors, family = binomial)
-glm_correct_uniform <- glm(correct_uniform_swing ~ factor(year) + actual_winner + land, 
+glm_correct_uniform <- glm(correct_pure_uniform ~ factor(year) + actual_winner + land, 
                            data = all_errors, family = binomial)
 
 # Linear regression for error - both models
-lm_error_prop <- lm(abs(error_proportional_both_votes) ~ factor(year) + actual_winner + land, data = all_errors)
-lm_error_uniform <- lm(abs(error_uniform_swing) ~ factor(year) + actual_winner + land, data = all_errors)
+lm_error_prop <- lm(abs(error_pure_proportional) ~ factor(year) + actual_winner + land, data = all_errors)
+lm_error_uniform <- lm(abs(error_pure_uniform) ~ factor(year) + actual_winner + land, data = all_errors)
 
 # --- Error Magnitude Comparison (All Cases) ---
-tidy_prop <- tidy(lm_error_prop) %>% mutate(model = "Proportional Both Votes")
-tidy_uniform <- tidy(lm_error_uniform) %>% mutate(model = "Uniform Swing")
+tidy_prop <- tidy(lm_error_prop) %>% mutate(model = "Pure Proportional")
+tidy_uniform <- tidy(lm_error_uniform) %>% mutate(model = "Pure Uniform")
 tidy_both <- bind_rows(tidy_prop, tidy_uniform) %>% filter(term != "(Intercept)")
 ggplot(tidy_both, aes(x = term, y = estimate, color = model, shape = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
@@ -204,8 +212,8 @@ ggplot(tidy_both, aes(x = term, y = estimate, color = model, shape = model)) +
 ggsave("figures/coefplot_error_comparison_custom.pdf", width = 10, height = 6)
 
 # --- Error Magnitude Comparison (Mispredicted Cases) ---
-tidy_mispred_prop <- tidy(lm_error_mispred_prop) %>% mutate(model = "Proportional Both Votes")
-tidy_mispred_uniform <- tidy(lm_error_mispred_uniform) %>% mutate(model = "Uniform Swing")
+tidy_mispred_prop <- tidy(lm_error_mispred_prop) %>% mutate(model = "Pure Proportional")
+tidy_mispred_uniform <- tidy(lm_error_mispred_uniform) %>% mutate(model = "Pure Uniform")
 tidy_mispred_both <- bind_rows(tidy_mispred_prop, tidy_mispred_uniform) %>% filter(term != "(Intercept)")
 ggplot(tidy_mispred_both, aes(x = term, y = estimate, color = model, shape = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
@@ -222,9 +230,29 @@ ggplot(tidy_mispred_both, aes(x = term, y = estimate, color = model, shape = mod
   theme(legend.position = "bottom")
 ggsave("figures/coefplot_error_mispredicted_comparison_custom.pdf", width = 10, height = 6)
 
+
+# --- Error Magnitude Comparison (All) ---
+tidy_error_prop <- tidy(lm_error_prop) %>% mutate(model = "Pure Proportional")
+tidy_error_uniform <- tidy(lm_error_uniform) %>% mutate(model = "Pure Uniform")
+tidy_error_both <- bind_rows(tidy_error_prop, tidy_error_uniform) %>% filter(term != "(Intercept)")
+ggplot(tidy_error_both, aes(x = term, y = estimate, color = model, shape = model)) +
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error),
+                position = position_dodge(width = 0.5), width = 0.2) +
+  coord_flip() +
+  labs(
+    x = "Coefficient",
+    y = "Estimate",
+    color = "Model",
+    shape = "Model"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave("figures/coefplot_error_all_comparison_custom.pdf", width = 10, height = 6)
+
 # --- Correct Prediction Comparison (Logistic) ---
-tidy_logit_prop <- tidy(glm_correct_prop) %>% mutate(model = "Proportional Both Votes")
-tidy_logit_uniform <- tidy(glm_correct_uniform) %>% mutate(model = "Uniform Swing")
+tidy_logit_prop <- tidy(glm_correct_prop) %>% mutate(model = "Pure Proportional")
+tidy_logit_uniform <- tidy(glm_correct_uniform) %>% mutate(model = "Pure Uniform")
 tidy_logit_both <- bind_rows(tidy_logit_prop, tidy_logit_uniform) %>% filter(term != "(Intercept)")
 ggplot(tidy_logit_both, aes(x = term, y = estimate, color = model, shape = model)) +
   geom_point(position = position_dodge(width = 0.5), size = 2) +
@@ -243,37 +271,37 @@ ggsave("figures/coefplot_correct_comparison_custom.pdf", width = 10, height = 6)
 
 # Summary statistics comparison
 cat("\n=== ERROR MAGNITUDE COMPARISON ===\n")
-cat("Proportional Both Votes - Mean Error:", mean(abs(all_errors$error_proportional_both_votes), na.rm = TRUE), "\n")
-cat("Uniform Swing - Mean Error:", mean(abs(all_errors$error_uniform_swing), na.rm = TRUE), "\n")
+cat("Pure Proportional - Mean Error:", mean(abs(all_errors$error_pure_proportional), na.rm = TRUE), "\n")
+cat("Pure Uniform - Mean Error:", mean(abs(all_errors$error_pure_uniform), na.rm = TRUE), "\n")
 
 cat("\n=== CORRECT PREDICTION RATE COMPARISON ===\n")
-cat("Proportional Both Votes - Correct Rate:", mean(all_errors$correct_proportional_both_votes, na.rm = TRUE), "\n")
-cat("Uniform Swing - Correct Rate:", mean(all_errors$correct_uniform_swing, na.rm = TRUE), "\n")
+cat("Pure Proportional - Correct Rate:", mean(all_errors$correct_pure_proportional, na.rm = TRUE), "\n")
+cat("Pure Uniform - Correct Rate:", mean(all_errors$correct_pure_uniform, na.rm = TRUE), "\n")
 
 # Paired t-test for error comparison
-error_comparison <- t.test(abs(all_errors$error_proportional_both_votes), 
-                          abs(all_errors$error_uniform_swing), 
+error_comparison <- t.test(abs(all_errors$error_pure_proportional), 
+                          abs(all_errors$error_pure_uniform), 
                           paired = TRUE)
 cat("\n=== PAIRED T-TEST FOR ERROR COMPARISON ===\n")
 print(error_comparison)
 
-# For proportional_both_votes model
+# For pure_proportional model
 mispredicted_proportional <- all_errors %>%
-  filter(winner_proportional_both_votes != actual_winner) %>%
+  filter(winner_pure_proportional != actual_winner) %>%
   mutate(
-    predicted_resp_E_actual_winner = error_proportional_both_votes + resp_E_actual_winner,
-    model = "proportional_both_votes"
+    predicted_resp_E_actual_winner = error_pure_proportional + resp_E_actual_winner,
+    model = "pure_proportional"
   ) %>%
-  dplyr::select(year, wkr, actual_winner, winner_proportional_both_votes, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
+  dplyr::select(year, wkr, actual_winner, winner_pure_proportional, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
 
-# For uniform_swing model
+# For pure_uniform model
 mispredicted_uniform <- all_errors %>%
-  filter(winner_uniform_swing != actual_winner) %>%
+  filter(winner_pure_uniform != actual_winner) %>%
   mutate(
-    predicted_resp_E_actual_winner = error_uniform_swing + resp_E_actual_winner,
-    model = "uniform_swing"
+    predicted_resp_E_actual_winner = error_pure_uniform + resp_E_actual_winner,
+    model = "pure_uniform"
   ) %>%
-  dplyr::select(year, wkr, actual_winner, winner_uniform_swing, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
+  dplyr::select(year, wkr, actual_winner, winner_pure_uniform, resp_E_actual_winner, predicted_resp_E_actual_winner, model)
 
 # Combine both models
 mispredicted_df <- bind_rows(mispredicted_proportional, mispredicted_uniform)
@@ -291,16 +319,16 @@ ggplot(mispredicted_df, aes(x = resp_E_actual_winner, y = predicted_resp_E_actua
     title = "Actual vs Predicted Results for Mispredicted Constituency Winners"
   ) +
   scale_color_manual(
-    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = "#1b9e77", "pure_uniform" = "#d95f02"),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   scale_shape_manual(
-    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = 16, "pure_uniform" = 17),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   scale_fill_manual(
-    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = "#1b9e77", "pure_uniform" = "#d95f02"),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   theme_minimal() +
   theme(legend.position = "bottom", plot.title = element_blank())
@@ -323,11 +351,11 @@ mispredicted_2025 <- mispredicted_df %>%
 ggplot(mispredicted_2025, aes(x = resp_E_actual_winner)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
   geom_segment(
-    aes(xend = resp_E_actual_winner, y = pred_proportional_both_votes, yend = pred_uniform_swing),
+    aes(xend = resp_E_actual_winner, y = pred_pure_proportional, yend = pred_pure_uniform),
     alpha = 0.3, color = "black"
   ) +
-  geom_point(aes(y = pred_proportional_both_votes, color = "proportional_both_votes", shape = "proportional_both_votes"), alpha = 0.7) +
-  geom_point(aes(y = pred_uniform_swing, color = "uniform_swing", shape = "uniform_swing"), alpha = 0.7) +
+  geom_point(aes(y = pred_pure_proportional, color = "pure_proportional", shape = "pure_proportional"), alpha = 0.7) +
+  geom_point(aes(y = pred_pure_uniform, color = "pure_uniform", shape = "pure_uniform"), alpha = 0.7) +
   labs(
     x = "Actual Candidate Vote Share of Winner",
     y = "Predicted Candidate Vote Share of Winner",
@@ -336,12 +364,12 @@ ggplot(mispredicted_2025, aes(x = resp_E_actual_winner)) +
     shape = "Model"
   ) +
   scale_color_manual(
-    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = "#1b9e77", "pure_uniform" = "#d95f02"),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   scale_shape_manual(
-    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = 16, "pure_uniform" = 17),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   theme_minimal()
 
@@ -362,16 +390,16 @@ ggplot(mispredicted_wide, aes(x = resp_E_actual_winner)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
   # Add shaded density for each model
   stat_density_2d(
-    data = mispredicted_df %>% filter(model == "proportional_both_votes"),
-    aes(y = predicted_resp_E_actual_winner, fill = "proportional_both_votes"),
+    data = mispredicted_df %>% filter(model == "pure_proportional"),
+    aes(y = predicted_resp_E_actual_winner, fill = "pure_proportional"),
     geom = "polygon",
     color = NA,
     alpha = 0.1,
     show.legend = FALSE
   ) +
   stat_density_2d(
-    data = mispredicted_df %>% filter(model == "uniform_swing"),
-    aes(y = predicted_resp_E_actual_winner, fill = "uniform_swing"),
+    data = mispredicted_df %>% filter(model == "pure_uniform"),
+    aes(y = predicted_resp_E_actual_winner, fill = "pure_uniform"),
     geom = "polygon",
     color = NA,
     alpha = 0.1,
@@ -380,13 +408,13 @@ ggplot(mispredicted_wide, aes(x = resp_E_actual_winner)) +
   geom_segment(
     aes(
       xend = resp_E_actual_winner,
-      y = pred_proportional_both_votes,
-      yend = pred_uniform_swing
+      y = pred_pure_proportional,
+      yend = pred_pure_uniform
     ),
     alpha = 0.3, color = "black"
   ) +
-  geom_point(aes(y = pred_proportional_both_votes, color = "proportional_both_votes", shape = "proportional_both_votes"), alpha = 0.7) +
-  geom_point(aes(y = pred_uniform_swing, color = "uniform_swing", shape = "uniform_swing"), alpha = 0.7) +
+  geom_point(aes(y = pred_pure_proportional, color = "pure_proportional", shape = "pure_proportional"), alpha = 0.7) +
+  geom_point(aes(y = pred_pure_uniform, color = "pure_uniform", shape = "pure_uniform"), alpha = 0.7) +
   facet_wrap(~ year) +
   labs(
     x = "Actual Candidate Vote Share of Winner",
@@ -395,16 +423,16 @@ ggplot(mispredicted_wide, aes(x = resp_E_actual_winner)) +
     shape = "Model"
   ) +
   scale_color_manual(
-    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = "#1b9e77", "pure_uniform" = "#d95f02"),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   scale_fill_manual(
-    values = c("proportional_both_votes" = "#1b9e77", "uniform_swing" = "#d95f02"),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = "#1b9e77", "pure_uniform" = "#d95f02"),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   scale_shape_manual(
-    values = c("proportional_both_votes" = 16, "uniform_swing" = 17),
-    labels = c("proportional_both_votes" = "Proportional Both Votes", "uniform_swing" = "Uniform Swing")
+    values = c("pure_proportional" = 16, "pure_uniform" = 17),
+    labels = c("pure_proportional" = "Pure Proportional", "pure_uniform" = "Pure Uniform")
   ) +
   theme_minimal() +
   theme(legend.position = "bottom", plot.title = element_blank())

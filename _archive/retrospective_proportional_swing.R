@@ -156,10 +156,10 @@ btw_candidates <- btw_candidates %>%
   left_join(federal_leads %>% select(election, party, polls_months, vote_share_l1),
             by = c("election", "party"))
 
-# Calculate proportional swing
+# Calculate proportional swing (matching Lukas's approach)
 btw_candidates <- btw_candidates %>%
   mutate(
-    proportional = polls_months / vote_share_l1,
+    proportional = (polls_months - vote_share_l1) / vote_share_l1,
   )
 
 # ========== Retrospective Model Training and Prediction ==========
