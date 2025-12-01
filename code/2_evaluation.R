@@ -80,11 +80,7 @@ formulas <- data.frame(
     # proportional = baseline proportional swing, positive_proportional_above_avg = effect for positive proportional swings in strong districts
     # negative_proportional_above_avg = effect for negative proportional swings in strong districts
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + positive_proportional_above_avg + negative_proportional_above_avg + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 7. Pure proportional model (no other variables)
-    "resp_E ~ res_l1_E + proportional_swing",
-    # 8. Pure uniform model (no other variables)
-    "resp_E ~ res_l1_E + uniform_swing",
-    # 9. Proportional with interaction
+    # 7. Proportional with interaction
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
     # 10. Uniform with interaction
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*uniform_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
@@ -96,8 +92,6 @@ formulas <- data.frame(
            "mixed",
            "uniform_piecewise",
            "proportional_piecewise",
-           "proportional_pure",
-           "uniform_pure",
            "proportional_interaction",
            "uniform_interaction",
            "no_adjustment"

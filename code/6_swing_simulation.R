@@ -10,44 +10,37 @@ library(patchwork)
 # ========== 1. Define Simplified Parameter Grid ==========
 set.seed(123)
 
-n_districts <- 100
-n_sim_per_scenario <- 1
+n_districts <- 100  # Keep at 100 for computational efficiency, but note real-world ranges from 4-647
+n_sim_per_scenario <- 5
 
 # Simplified parameter grid focusing on small party clustering
+# NOTE: n_parties here represents parties with ≥5% national vote share
 param_grid <- expand.grid(
-  n_parties = c(2, 3, 4, 5, 6, 7),  # At least 1 large party
-  n_small_parties = c(0, 2, 4, 6),  # More small parties to test proportional
+  n_parties = c(2, 3, 4, 5, 6, 8, 10),  # Typical range for parties ≥5%
+  n_small_parties = c(0, 1, 2, 3, 4),  # Small parties (≥5%) subset
   n_stronghold_districts = c(10, 25, 40),  # How many districts have high support
   stronghold_share = c(0.3, 0.45, 0.60),   # Vote share in stronghold districts
-  national_level_vote_variance = c(0.01, 0.03, 0.05, 0.07, 0.09),  # National-level vote volatility
+  national_level_vote_variance = c(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07),  # National-level vote volatility (updated to cover real-world range 0.01-0.066)
   uniform_share = c(0, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1),  # Data generation share of uniform swing
-  between_district_vote_volatility = c(0.002, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03),  # Between-district vote volatility
+  between_district_vote_volatility = c(0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.12, 0.15),  # Between-district vote volatility (updated to cover real-world range 0.02-0.15)
   stringsAsFactors = FALSE
 )
 
 # Filter out invalid combinations and unrealistic party combinations
 param_grid <- param_grid %>%
   filter(n_small_parties <= n_parties - 1) %>%
-  # Add realistic constraints: max 4-5 large parties when 0 small parties, 
-  # and for each 2 small parties, reduce max large parties by 1
   mutate(n_large_parties = n_parties - n_small_parties) %>%
   filter(
-    # When no small parties: max 5 large parties
-    !(n_small_parties == 0 & n_large_parties > 5) &
-    # When 2 small parties: max 4 large parties  
-    !(n_small_parties == 2 & n_large_parties > 4) &
-    # When 4 small parties: max 3 large parties
-    !(n_small_parties == 4 & n_large_parties > 3) &
-    # When 6 small parties: max 2 large parties
-    !(n_small_parties == 6 & n_large_parties > 2) &
-    # Always need at least 1 large party
-    n_large_parties >= 1
+    # Always need at least 1 large party (≥5%)
+    n_large_parties >= 1,
+    # Cap large parties to 5 as realistic upper bound
+    n_large_parties <= 5
   ) %>%
   dplyr::select(-n_large_parties)  # Remove the helper column
 
 
 
-# Helper: generate baseline shares with small party strongholds
+# Helper: generate baseline shares with small party strongholds (all parties are ≥5%)
 make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_stronghold_districts, stronghold_share, n_districts, between_district_vote_volatility) {
   n_large_parties <- n_parties - n_small_parties
   
@@ -63,8 +56,8 @@ make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_strongh
     large_baseline <- rep(0.20, n_large_parties)  # Reduced from 0.25
   }
   
-  # Small parties: more realistic baseline (like German small parties)
-  small_baseline <- rep(0.10, n_small_parties)  # Increased from 0.12 to 0.15
+  # Small parties (≥5%): baseline around threshold
+  small_baseline <- rep(0.06, n_small_parties)
   
   baseline_shares <- c(large_baseline, small_baseline)
   baseline_shares <- baseline_shares / sum(baseline_shares)  # Normalize
@@ -79,8 +72,8 @@ make_baseline_with_strongholds <- function(n_parties, n_small_parties, n_strongh
             sd = between_district_vote_volatility),  # Increased from 0.03 to 0.08 for more variation
       nrow = n_districts, ncol = n_parties
     )
-    # Ensure that all values between 0 and 100
-    baseline_matrix[, 1:n_parties] <- pmax(pmin(baseline_matrix[, 1:n_parties], 0.9), 0.05)
+    # Ensure that all values between 0 and 100, but allow values to drop below 5% in some districts
+    baseline_matrix[, 1:n_parties] <- pmax(pmin(baseline_matrix[, 1:n_parties], 0.9), 0.01)
   
     # colMeans(baseline_matrix)
   
@@ -570,8 +563,8 @@ p0 <- ggplot(param_grid_viz, aes(x = n_parties, y = n_small_parties,
   labs(
     title = "Parameter Grid Structure",
     subtitle = "Each point represents a scenario combination",
-    x = "Number of Parties", 
-    y = "Number of Small Parties",
+    x = "Number of Parties (≥5%)", 
+    y = "Number of Small Parties (≥5%)",
     caption = paste("Total scenarios:", nrow(param_grid), 
                    "| Total simulations:", nrow(param_grid) * n_sim_per_scenario)
   ) +
@@ -603,8 +596,8 @@ p1 <- ggplot(model_comparison, aes(x = n_parties, y = n_small_parties, fill = ac
   labs(
     title = "When Does Each Model Perform Better?",
     subtitle = "Blue = Proportional better, Orange = Uniform better",
-    x = "Number of Parties", 
-    y = "Number of Small Parties"
+    x = "Number of Parties (≥5%)", 
+    y = "Number of Small Parties (≥5%)"
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
@@ -657,9 +650,9 @@ p3 <- ggplot(model_comparison, aes(
   scale_color_brewer(palette = "Set1", name = "Small Parties") +
   scale_shape_manual(values = 1:5, name = "Small Parties") +
   labs(
-    title = "Effect of Number of Parties and Number of Small Parties",
+    title = "Effect of Number of Parties (≥5%) and Number of Small Parties (≥5%)",
     subtitle = "Positive = Uniform better, Negative = Proportional better",
-    x = "Number of Parties", 
+    x = "Number of Parties (≥5%)", 
     y = "Accuracy Difference (Uniform - Proportional)"
   ) +
   theme_minimal() +
@@ -771,13 +764,13 @@ coef_data <- bind_rows(
 ) %>%
   filter(term != "(Intercept)") %>%
   mutate(
-    term = case_when(
-      term == "log_n_parties" ~ "Log(Number of Parties)",
-      term == "log_n_small_parties" ~ "Log(Number of Small Parties)",
+    term_clean = case_when(
+      term == "log_n_parties" ~ "Log(Number of Parties (≥5%))",
+      term == "log_n_small_parties" ~ "Log(Number of Small Parties (≥5%))",
       term == "stronghold_ratio" ~ "Stronghold Ratio",
       term == "log_national_level_vote_variance" ~ "Log(National Level Vote Variance)",
-          term == "uniform_share" ~ "Uniform Share",
-    term == "log_between_district_vote_volatility" ~ "Log(Between-District Vote Volatility)",
+      term == "uniform_share" ~ "Uniform Share",
+      term == "log_between_district_vote_volatility" ~ "Log(Between-District Vote Volatility)",
       term == "small_stronghold_ratio" ~ "Small Party Stronghold Ratio",
       TRUE ~ term
     ),
@@ -789,11 +782,20 @@ coef_data <- bind_rows(
       model == "MAE Difference" ~ "MAE (Positive = Uniform Worse)",
       model == "RMSE Difference" ~ "RMSE (Positive = Uniform Worse)"
     )
-  ) %>%
-  arrange(desc(abs_estimate))
+  )
+
+# Create consistent ordering based on average absolute effect across all models
+coef_ordering <- coef_data %>%
+  group_by(term_clean) %>%
+  summarise(avg_abs = mean(abs_estimate), .groups = 'drop') %>%
+  arrange(desc(avg_abs)) %>%
+  pull(term_clean)
+
+coef_data <- coef_data %>%
+  mutate(term_clean = factor(term_clean, levels = coef_ordering))
 
 # Coefficient plot
-p4 <- ggplot(coef_data, aes(x = estimate, y = reorder(term, abs_estimate), color = model_label, shape = model_label)) +
+p4 <- ggplot(coef_data, aes(x = estimate, y = term_clean, color = model_label, shape = model_label)) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
   geom_point(size = 2, position = position_dodge(width = 0.3)) +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, position = position_dodge(width = 0.3)) +
@@ -813,7 +815,9 @@ p4 <- ggplot(coef_data, aes(x = estimate, y = reorder(term, abs_estimate), color
     axis.text.y = element_text(size = 10),
     plot.title = element_text(size = 14, face = "bold"),
     plot.subtitle = element_text(size = 12),
-    legend.position = "bottom"
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    legend.box = "horizontal"
   )
 
 # Save plot 4
@@ -863,39 +867,84 @@ first_diff_data <- bind_rows(
     coefficient = coef(model4)[variable_ranges$variable],
     range = variable_ranges$range
   )
-) %>%
+)
+
+# Create consistent ordering for first differences plot (same as coefficient plot)
+# Use the same ordering as the coefficient plot
+first_diff_data <- first_diff_data %>%
   mutate(
     variable_clean = case_when(
-      variable == "log_n_parties" ~ "Number of Parties (log)",
-      variable == "log_n_small_parties" ~ "Number of Small Parties (log)",
-      variable == "stronghold_ratio" ~ "Stronghold Share",
-      variable == "log_national_level_vote_variance" ~ "National Vote Variance (log)",
+      variable == "log_n_parties" ~ "Log(Number of Parties (≥5%))",
+      variable == "log_n_small_parties" ~ "Log(Number of Small Parties (≥5%))",
+      variable == "stronghold_ratio" ~ "Stronghold Ratio",
+      variable == "log_national_level_vote_variance" ~ "Log(National Level Vote Variance)",
       variable == "uniform_share" ~ "Uniform Share",
-      variable == "log_between_district_vote_volatility" ~ "District Vote Volatility (log)",
+      variable == "log_between_district_vote_volatility" ~ "Log(Between-District Vote Volatility)",
       variable == "small_stronghold_ratio" ~ "Small Party Stronghold Ratio"
-    )
+    ),
+    variable_clean = factor(variable_clean, levels = coef_ordering)
   )
 
-# Plot first differences
-first_diff_plot <- ggplot(first_diff_data, aes(x = variable_clean, y = first_diff, fill = model)) +
-  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+# Create left plot (Accuracy only)
+accuracy_data <- first_diff_data %>%
+  filter(model == "Performance Difference (Uniform - Proportional)")
+
+left_plot <- ggplot(accuracy_data, aes(x = variable_clean, y = first_diff)) +
+  geom_bar(stat = "identity", fill = "#0072B2", width = 0.7) +
   geom_text(aes(label = sprintf("%.3f", first_diff)), 
-            position = position_dodge(width = 0.7), vjust = -0.5, size = 3) +
-  labs(title = "First Differences: Actual Impact on Model Performance",
-       subtitle = "Shows the actual change in performance when moving from min to max of each variable",
-       x = "Predictor Variables",
-       y = "First Difference (Actual Performance Change)",
-       fill = "Performance Metric") +
+            vjust = -0.5, size = 4) +
+  labs(title = "Accuracy",
+       x = NULL,
+       y = "First Difference") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        legend.position = "bottom") +
-  scale_fill_brewer(palette = "Set2") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+        axis.text.y = element_text(size = 11),
+        plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        plot.margin = margin(r = 10)) +
   coord_flip()
 
-print(first_diff_plot)
-ggsave("figures/06_first_differences.pdf", first_diff_plot, width = 12, height = 8)
-ggsave("figures/06_first_differences.png", first_diff_plot, width = 12, height = 8)
-cat("✓ First differences plot saved to figures/06_first_differences.pdf and .png\n")
+# Create right plot (Error metrics)
+error_data <- first_diff_data %>%
+  filter(model %in% c("MAE Difference (Uniform - Proportional)", "RMSE Difference (Uniform - Proportional)"))
+
+right_plot <- ggplot(error_data, aes(x = variable_clean, y = first_diff, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", first_diff)), 
+            position = position_dodge(width = 0.7), vjust = -0.5, size = 4) +
+  labs(title = "Error Metrics",
+       x = NULL,
+       y = "First Difference",
+       fill = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+        axis.text.y = element_blank(),  # Hide y-axis labels
+        axis.ticks.y = element_blank(), # Hide y-axis ticks
+        plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+        legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 10),
+        plot.margin = margin(l = 10)) +
+  scale_fill_manual(values = c("#E69F00", "#56B4E9"),
+                    labels = c("MAE", "RMSE")) +
+  coord_flip()
+
+# Combine plots using patchwork
+library(patchwork)
+combined_plot <- left_plot + right_plot +
+  plot_layout(ncol = 2, widths = c(1, 1)) +
+  plot_annotation(
+    title = "First Differences: Actual Impact on Model Performance",
+    subtitle = "Shows the actual change in performance when moving from min to max of each variable",
+    caption = "Left: Accuracy differences. Right: Error metric differences (MAE and RMSE)."
+  ) &
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 12),
+        plot.caption = element_text(size = 10))
+
+print(combined_plot)
+ggsave("figures/06_first_differences.pdf", combined_plot, width = 12, height = 8)
+ggsave("figures/06_first_differences.png", combined_plot, width = 12, height = 8)
+cat("✓ First differences plot with shared labels saved to figures/06_first_differences.pdf and .png\n")
 
 # Summary table of first differences
 cat("\nFirst Differences Summary:\n")
@@ -937,6 +986,33 @@ regression_data %>%
     avg_rmse_proportional = mean(rmse_proportional),
     n = n()
   ) %>%
+  print()
+
+
+# for the three models, get the share where accuracy is highest for each model
+(regression_data %>% 
+  mutate(
+    best_model = case_when(
+      accuracy_uniform > accuracy_proportional & accuracy_uniform > accuracy_mixed ~ "uniform",
+      accuracy_proportional > accuracy_uniform & accuracy_proportional > accuracy_mixed ~ "proportional",
+      accuracy_mixed > accuracy_uniform & accuracy_mixed > accuracy_proportional ~ "mixed",
+      TRUE ~ "tie"
+    )
+  ))$best_model %>% table / nrow(regression_data)
+
+  group_by(n_small_parties, best_model) %>%
+  summarize(
+    n = n()
+  ) %>%
+  pivot_wider(names_from = best_model, values_from = n, values_fill = 0) %>%
+  mutate(
+    total = uniform + proportional + mixed + tie,
+    uniform_share = uniform / total,
+    proportional_share = proportional / total,
+    mixed_share = mixed / total,
+    tie_share = tie / total
+  ) %>%
+  select(n_small_parties, uniform_share, proportional_share, mixed_share, tie_share) %>%
   print()
 
 cat("\n2. Effect of stronghold ratio on performance:\n")
@@ -1080,11 +1156,11 @@ library(stargazer)
 #           summary = FALSE)
 
 # Table 2: Regression results
-stargazer(model1, model2, model3, model4,
+stargazer(model1, model3, model4,
           type = "latex",
           title = "Regression Results: Explaining Model Performance Differences",
-          column.labels = c("Accuracy Diff", "Rel. Performance", "MAE Diff", "RMSE Diff"),
-          dep.var.labels = c("Uniform - Proportional", "Proportional Improvement (%)", "Uniform - Proportional", "Uniform - Proportional"),
+          column.labels = c("Accuracy Diff", "MAE Diff", "RMSE Diff"),
+          dep.var.labels = c("Uniform - Proportional", "Uniform - Proportional", "Uniform - Proportional"),
           out = "tables/regression_table.tex",
           digits = 4,
           style = "aer")
@@ -1171,4 +1247,5 @@ print(uniform_favorable %>%
 
 sink()
 cat("✓ Report saved to data/out/simulation_report.txt\n")
+
 

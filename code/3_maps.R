@@ -73,9 +73,9 @@ btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
     uniform_swing = res_l1_Z + uniform
   )
 
-# Define the formula for the "proportional both votes" model
+# Define the formula for the "mixed" model
 model_formula <- as.formula(
-  "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
+  "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + uniform_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
 )
 
 
@@ -142,7 +142,7 @@ for (i in seq_along(names(shapefile_info))) {
       incorrect = winner != winner_pred,
       party_color = ifelse(incorrect, party, NA) # party column should be the actual winner's party
     ) %>%
-    select(wkr, incorrect, party_color)
+    dplyr::select(wkr, incorrect, party_color)
   test_summaries[[year]] <- test_summary
   
   # 7. Merge with shapefile data
