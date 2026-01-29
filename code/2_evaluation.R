@@ -1,7 +1,6 @@
 
 # ----------------------------------------------------------
 # District-Level Swing Model Project
-# Authors: Lukas Stoetzer & Cornelius Erfort
 # ----------------------------------------------------------
 
 # ========== Load Required Libraries ==========
@@ -13,7 +12,8 @@ suppressPackageStartupMessages({
   library(xml2)        # XML parsing
   library(xtable)      # Export tables to LaTeX
   library(ggplot2)     # Advanced plotting
-  # ... add others as needed
+  library(gt)
+  library(scales)
 })
 
 # ========== Load Data ==========
@@ -68,23 +68,23 @@ formulas <- data.frame(
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
     # 2. Uniform swing adjustment with single coefficient
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + uniform_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 4. Proportional and uniform together
+    # 3. Proportional and uniform together
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + uniform_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 5. Piecewise swing model (interaction approach)
+    # 4. Piecewise swing model (interaction approach)
     # This model allows swing to differ between strong and weak districts for positive vs. negative swings
     # uniform = baseline swing effect, positive_swing_above_avg = effect for positive swings in strong districts
     # negative_swing_above_avg = effect for negative swings in strong districts
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + uniform_swing + positive_uniform_above_avg + negative_uniform_above_avg + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 6. Piecewise proportional model (interaction approach)
+    # 5. Piecewise proportional model (interaction approach)
     # This model combines piecewise logic with proportional swing behavior
     # proportional = baseline proportional swing, positive_proportional_above_avg = effect for positive proportional swings in strong districts
     # negative_proportional_above_avg = effect for negative proportional swings in strong districts
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + proportional_swing + positive_proportional_above_avg + negative_proportional_above_avg + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 7. Proportional with interaction
+    # 6. Proportional with interaction
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*proportional_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 10. Uniform with interaction
+    # 7. Uniform with interaction
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z*uniform_swing + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1",
-    # 11. No adjustment (baseline)
+    # 8. No adjustment (baseline)
     "resp_E ~ ncand + propPlatz + alsoList + res_l1_E + res_l1_Z + formercand + east + female + incumbent + akad + incumbent_in_wkr + no_cand_l1"
   ),
   name = c("proportional",
@@ -275,122 +275,63 @@ model_order <- eval_aggregate$name[order(eval_aggregate$avg_accuracy_winner, dec
 eval_results$name_ordered <- factor(eval_results$name, levels = model_order)
 eval_aggregate$name_ordered <- factor(eval_aggregate$name, levels = model_order)
 
-ggplot() +
-  # Individual election results as dots with labels
-  geom_point(data = eval_results, aes(x = name_ordered, y = accuracy_winner, group = name), 
-             position = position_jitter(width = 0.2, seed = 123), 
-             alpha = 0.6, size = 2, color = "steelblue") +
-  # Add text labels for individual elections
-  geom_text(data = eval_results, aes(x = name_ordered, y = accuracy_winner, label = election), 
-            position = position_jitter(width = 0.2, seed = 123), 
-            size = 2.5, hjust = -0.3, vjust = 0.5, color = "darkblue") +
-  # Overall average as a different symbol (diamond)
-  geom_point(data = eval_aggregate, aes(x = name_ordered, y = avg_accuracy_winner), 
-             shape = 23, size = 4, fill = "red", color = "darkred") +
-  # Add average line
-  geom_hline(data = eval_aggregate, aes(yintercept = avg_accuracy_winner, group = name_ordered), 
-             linetype = "dashed", color = "red", alpha = 0.7) +
-  labs(title = "Out-of-sample Performance of Models",
-       subtitle = "Individual elections (dots) and overall average (red diamonds)",
-       x = "Model",
-       y = "Accuracy (Winner Prediction)") +
-  theme_minimal() +
-  coord_flip() +
-  theme(text = element_text(size = 12),
-        legend.position = "none")
-# Save the plot to pdf
-ggsave("figures/accuracy.pdf", width = 10, height = 8)
+
+# gt table for accuarcy across elections
+
+# Reshape eval_results
+table_data <- eval_results %>%
+  select(name, election, accuracy_winner) %>%
+  pivot_wider(names_from = election, values_from = accuracy_winner) %>%
+  left_join(eval_aggregate %>% select(name, avg_accuracy_winner), by = "name") %>%
+  rename(Average = avg_accuracy_winner) %>%
+  arrange(desc(Average))  # sort descending by Average
+
+# Identify all accuracy columns (including Average)
+accuracy_cols <- setdiff(names(table_data), "name")
+
+# Determine global min/max across all accuracy values for gradient
+acc_range <- range(table_data %>% select(all_of(accuracy_cols)), na.rm = TRUE)
+
+# Create gt table
+gt_table <- table_data %>%
+  mutate(name = str_to_title(name) %>% str_replace("_", " ")) %>%
+  gt(rowname_col = "name") %>%
+  # Apply linear color gradient to all accuracy columns (red → green)
+  data_color(
+    columns = all_of(accuracy_cols),
+    colors = scales::col_numeric(
+      palette = c("#d73027", "#1a9850"),
+      domain = acc_range
+    ),
+    apply_to = "fill"
+  ) %>%
+  fmt_number(
+    columns = all_of(accuracy_cols),
+    decimals = 3
+  ) %>%
+  fmt_percent(decimals = 1) %>% 
+  # Bold Average column
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(columns = vars(Average))
+  ) %>%
+  # Vertical border before Average
+  tab_style(
+    style = cell_borders(
+      sides = "left",
+      color = "black",
+      weight = px(2)
+    ),
+    locations = cells_body(columns = vars(Average))
+  )
+
+# Export
+gtsave(gt_table, "figures/model_accuracy_table.png")
 
 # ========== Comprehensive Analysis of ALL Observations ==========
 # Create plots and analysis for comprehensive evaluation metrics
 
-# 1. Out-of-bounds predictions analysis (sorted by avg_out_of_bounds_pct ascending - lower is better)
-model_order_out_of_bounds <- eval_aggregate$name[order(eval_aggregate$avg_out_of_bounds_pct)]
-eval_results$name_ordered_out_of_bounds <- factor(eval_results$name, levels = model_order_out_of_bounds)
-eval_aggregate$name_ordered_out_of_bounds <- factor(eval_aggregate$name, levels = model_order_out_of_bounds)
-
-ggplot() +
-  geom_point(data = eval_results, aes(x = name_ordered_out_of_bounds, y = out_of_bounds_pct * 100, color = factor(election)), 
-             position = position_jitter(width = 0.2, seed = 123), size = 3, alpha = 0.7) +
-  geom_point(data = eval_aggregate, aes(x = name_ordered_out_of_bounds, y = avg_out_of_bounds_pct * 100), 
-             shape = 23, size = 4, fill = "red", color = "darkred") +
-  labs(title = "Out-of-Bounds Predictions (0-100% range)",
-       subtitle = "Individual elections (colored dots) and overall average (red diamonds) - Sorted by performance (lower is better)",
-       x = "Model",
-       y = "Percentage of Out-of-Bounds Predictions (%)",
-       color = "Election Year") +
-  theme_minimal() +
-  coord_flip() +
-  theme(text = element_text(size = 12),
-        legend.position = "bottom")
-ggsave("figures/out_of_bounds_analysis.pdf", width = 10, height = 8)
-
-# 2. Mean Absolute Error for all observations (sorted by avg_mae_all ascending - lower is better)
-model_order_mae <- eval_aggregate$name[order(eval_aggregate$avg_mae_all)]
-eval_results$name_ordered_mae <- factor(eval_results$name, levels = model_order_mae)
-eval_aggregate$name_ordered_mae <- factor(eval_aggregate$name, levels = model_order_mae)
-
-ggplot() +
-  geom_point(data = eval_results, aes(x = name_ordered_mae, y = mae_all, color = factor(election)), 
-             position = position_jitter(width = 0.2, seed = 123), size = 3, alpha = 0.7) +
-  geom_point(data = eval_aggregate, aes(x = name_ordered_mae, y = avg_mae_all), 
-             shape = 23, size = 4, fill = "red", color = "darkred") +
-  labs(title = "Mean Absolute Error for All Observations",
-       subtitle = "Individual elections (colored dots) and overall average (red diamonds) - Sorted by performance (lower is better)",
-       x = "Model",
-       y = "Mean Absolute Error (percentage points)",
-       color = "Election Year") +
-  theme_minimal() +
-  coord_flip() +
-  theme(text = element_text(size = 12),
-        legend.position = "bottom")
-ggsave("figures/mae_all_analysis.pdf", width = 10, height = 8)
-
-# 3. Root Mean Square Error for all observations (sorted by avg_rmse_all ascending - lower is better)
-model_order_rmse <- eval_aggregate$name[order(eval_aggregate$avg_rmse_all)]
-eval_results$name_ordered_rmse <- factor(eval_results$name, levels = model_order_rmse)
-eval_aggregate$name_ordered_rmse <- factor(eval_aggregate$name, levels = model_order_rmse)
-
-ggplot() +
-  geom_point(data = eval_results, aes(x = name_ordered_rmse, y = rmse_all, color = factor(election)), 
-             position = position_jitter(width = 0.2, seed = 123), size = 3, alpha = 0.7) +
-  geom_point(data = eval_aggregate, aes(x = name_ordered_rmse, y = avg_rmse_all), 
-             shape = 23, size = 4, fill = "red", color = "darkred") +
-  labs(title = "Root Mean Square Error for All Observations",
-       subtitle = "Individual elections (colored dots) and overall average (red diamonds) - Sorted by performance (lower is better)",
-       x = "Model",
-       y = "RMSE (percentage points)",
-       color = "Election Year") +
-  theme_minimal() +
-  coord_flip() +
-  theme(text = element_text(size = 12),
-        legend.position = "bottom")
-ggsave("figures/rmse_all_analysis.pdf", width = 10, height = 8)
-
-# 4. Bias analysis for all observations (sorted by absolute avg_bias_all ascending - lower is better)
-model_order_bias <- eval_aggregate$name[order(abs(eval_aggregate$avg_bias_all))]
-eval_results$name_ordered_bias <- factor(eval_results$name, levels = model_order_bias)
-eval_aggregate$name_ordered_bias <- factor(eval_aggregate$name, levels = model_order_bias)
-
-ggplot() +
-  geom_point(data = eval_results, aes(x = name_ordered_bias, y = bias_all, color = factor(election)), 
-             position = position_jitter(width = 0.2, seed = 123), size = 3, alpha = 0.7) +
-  geom_point(data = eval_aggregate, aes(x = name_ordered_bias, y = avg_bias_all), 
-             shape = 23, size = 4, fill = "red", color = "darkred") +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
-  labs(title = "Prediction Bias for All Observations",
-       subtitle = "Individual elections (colored dots) and overall average (red diamonds) - Sorted by performance (lower absolute bias is better)",
-       x = "Model",
-       y = "Mean Bias (percentage points)",
-       color = "Election Year") +
-  theme_minimal() +
-  coord_flip() +
-  theme(text = element_text(size = 12),
-        legend.position = "bottom")
-ggsave("figures/bias_all_analysis.pdf", width = 10, height = 8)
-
-
-# 5. Model performance comparison heatmap for all metrics
+# Model performance comparison heatmap for all metrics
 # Prepare data for heatmap with standardized metrics (all higher = better)
 # First calculate the min/max values for each metric
 accuracy_range <- range(eval_aggregate$avg_accuracy_winner)
@@ -400,197 +341,66 @@ rmse_range <- range(eval_aggregate$avg_rmse_all)
 bias_range <- range(abs(eval_aggregate$avg_bias_all))
 
 heatmap_data <- eval_aggregate %>%
-  dplyr::select(name, avg_accuracy_winner, avg_out_of_bounds_pct, avg_mae_all, avg_rmse_all, avg_bias_all) %>%
-  mutate(
-    # Standardize all metrics to 0-1 scale where higher is always better
-    # Winner Accuracy: already higher is better, normalize to 0-1
-    accuracy_std = (avg_accuracy_winner - accuracy_range[1]) / (accuracy_range[2] - accuracy_range[1]),
-    # Out-of-bounds: lower is better, so invert and normalize to 0-1
-    out_of_bounds_std = 1 - (avg_out_of_bounds_pct - out_of_bounds_range[1]) / (out_of_bounds_range[2] - out_of_bounds_range[1]),
-    # MAE: lower is better, so invert and normalize to 0-1
-    mae_std = 1 - (avg_mae_all - mae_range[1]) / (mae_range[2] - mae_range[1]),
-    # RMSE: lower is better, so invert and normalize to 0-1
-    rmse_std = 1 - (avg_rmse_all - rmse_range[1]) / (rmse_range[2] - rmse_range[1]),
-    # Bias: lower absolute value is better, so normalize absolute bias and invert to 0-1
-    bias_std = 1 - (abs(avg_bias_all) - bias_range[1]) / (bias_range[2] - bias_range[1])
+  dplyr::select(name, avg_accuracy_winner, avg_out_of_bounds_pct, avg_mae_all, avg_rmse_all, avg_bias_all)
+
+
+# 1. Prepare clean table with correct column order, descending accuracy
+heatmap_data_clean <- heatmap_data %>%
+  transmute(
+    name,
+    `Winner accuracy` = avg_accuracy_winner,
+    `MAE` = avg_mae_all,
+    `RMSE` = avg_rmse_all,
+    `Out-of-bounds (share)` = avg_out_of_bounds_pct
   ) %>%
-  # Create clean data structure with one row per model-metric combination
-  mutate(
-    # Format raw values for display
-    accuracy_text = sprintf("%.3f", avg_accuracy_winner),
-    out_of_bounds_text = sprintf("%.2f%%", avg_out_of_bounds_pct * 100),
-    mae_text = sprintf("%.4f", avg_mae_all),
-    rmse_text = sprintf("%.4f", avg_rmse_all),
-    bias_text = sprintf("%.4f", abs(avg_bias_all))
+  arrange(desc(`Winner accuracy`))
+
+# Metric columns (everything except model name)
+metric_cols <- setdiff(names(heatmap_data_clean), "name")
+
+# 2. Build GT table
+gt_table <- heatmap_data_clean %>%
+  mutate(name = str_to_title(name) %>% str_replace("_", " ")) %>%
+  as.data.frame() %>%
+  gt(rowname_col = "name") %>%
+  fmt_number(
+    columns = all_of(metric_cols),
+    decimals = 4
   ) %>%
-  # Reshape to long format for plotting
-  pivot_longer(
-    cols = c(accuracy_std, out_of_bounds_std, mae_std, rmse_std, bias_std),
-    names_to = "metric_std",
-    values_to = "std_value"
-  ) %>%
-  mutate(
-    metric = case_when(
-      metric_std == "accuracy_std" ~ "Winner Accuracy",
-      metric_std == "out_of_bounds_std" ~ "Out-of-Bounds Predictions",
-      metric_std == "mae_std" ~ "Error: MAE",
-      metric_std == "rmse_std" ~ "Error: RMSE",
-      metric_std == "bias_std" ~ "Bias"
-    ),
-    raw_text = case_when(
-      metric_std == "accuracy_std" ~ accuracy_text,
-      metric_std == "out_of_bounds_std" ~ out_of_bounds_text,
-      metric_std == "mae_std" ~ mae_text,
-      metric_std == "rmse_std" ~ rmse_text,
-      metric_std == "bias_std" ~ bias_text
-    )
-  ) %>%
-  dplyr::select(name, metric, std_value, raw_text)
+  cols_width(
+    name ~ px(200),
+    everything() ~ px(100)
+  ) %>% 
+  fmt_percent(decimals = 1)
 
-# Sort models by descending accuracy for the heatmap
-model_order_accuracy <- eval_aggregate %>%
-  arrange(desc(avg_accuracy_winner)) %>%
-  pull(name)
-
-heatmap_data$name_ordered <- factor(heatmap_data$name, levels = rev(model_order_accuracy))
-
-# Create comprehensive heatmap showing performance distribution across models
-ggplot(heatmap_data, aes(x = metric, y = name_ordered, fill = std_value)) +
-  geom_tile() +
-  # Add text labels with raw values
-  geom_text(aes(label = raw_text), size = 3, color = "black", fontface = "bold") +
-  scale_fill_gradient2(
-    low = "#d73027", mid = "#fdb863", high = "#1a9850",  # Natural red-yellow-green
-    midpoint = 0.5,
-    name = "Performance\n(0=Poor, 1=Good)",
-    limits = c(0, 1)
-  ) +
-  labs(title = "Comprehensive Model Performance Heatmap",
-       subtitle = "Models sorted by descending accuracy",
-       x = "Performance Metric",
-       y = "Model") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        text = element_text(size = 12))
-ggsave("figures/comprehensive_performance_heatmap.pdf", width = 12, height = 8)
-
-
-
-# ========== Print Summary Statistics ==========
-cat("\n=== COMPREHENSIVE EVALUATION SUMMARY ===\n")
-cat("Analysis includes ALL observations, not just winners\n\n")
-
-# Out-of-bounds predictions summary
-cat("OUT-OF-BOUNDS PREDICTIONS (0-100% range is acceptable):\n")
-cat("Models with highest out-of-bounds predictions:\n")
-eval_aggregate %>% 
-  arrange(desc(avg_out_of_bounds_pct)) %>%
-  dplyr::select(name, avg_out_of_bounds_pct) %>%
-  mutate(avg_out_of_bounds_pct = round(avg_out_of_bounds_pct * 100, 2)) %>%
-  head(3) %>%
-  print()
-
-cat("\nModels with lowest out-of-bounds predictions:\n")
-eval_aggregate %>% 
-  arrange(avg_out_of_bounds_pct) %>%
-  dplyr::select(name, avg_out_of_bounds_pct) %>%
-  mutate(avg_out_of_bounds_pct = round(avg_out_of_bounds_pct * 100, 2)) %>%
-  head(3) %>%
-  print()
-
-# Overall prediction accuracy for all observations
-cat("\nOVERALL PREDICTION ACCURACY (All Observations):\n")
-cat("Models with lowest MAE:\n")
-eval_aggregate %>% 
-  arrange(avg_mae_all) %>%
-  dplyr::select(name, avg_mae_all) %>%
-  head(3) %>%
-  print()
-
-cat("\nModels with lowest RMSE:\n")
-eval_aggregate %>% 
-  arrange(avg_rmse_all) %>%
-  dplyr::select(name, avg_rmse_all) %>%
-  head(3) %>%
-  print()
-
-cat("\nModels with lowest bias:\n")
-eval_aggregate %>% 
-  arrange(abs(avg_bias_all)) %>%
-  dplyr::select(name, avg_bias_all) %>%
-  head(3) %>%
-  print()
-
-cat("\n=== END COMPREHENSIVE EVALUATION ===\n")
-
-# ========== Evaluate Models with Different Lead Types ==========
-# Repeat evaluation using different definitions of the 'proportional' variable (polls_days, polls_weeks, polls_months)
-lead_types <- c("polls_days.x", "polls_weeks.x", "polls_months.x")
-eval_results_leads <- data.frame(
-  formula = character(),
-  name = character(),
-  lead_type = character(),
-  election = integer(),
-  correct_predictions = integer(),
-  total_predictions = integer(),
-  accuracy = numeric()
-)
-
-for (lead_type in lead_types) {
-  for (formula in formulas$formula) {
-    print(paste("Formula:", formula, "Lead:", lead_type))
-    # Update 'proportional' variable for this lead type (matching Lukas's approach)
-    # Check if the lead type column exists and calculate proportional swing
-    if (lead_type %in% names(btw_candidates_1983_2025)) {
-      btw_candidates_1983_2025 <- btw_candidates_1983_2025 %>%
-        mutate(
-          proportional = case_when(
-            !is.na(.data[[lead_type]]) & !is.na(vote_share_l1.x) & vote_share_l1.x > 0 ~ (.data[[lead_type]] - vote_share_l1.x) / vote_share_l1.x,
-            TRUE ~ NA_real_
-          )
-        )
-    } else {
-      print(paste("Warning: Column", lead_type, "not found in data. Available columns:", paste(names(btw_candidates_1983_2025), collapse=", ")))
-      # Use the existing proportional variable
-    }
-    # Loop through elections for out-of-sample testing
-    for (this_election in c(1998, 2002, 2005, 2009, 2013, 2017, 2021, 2025)) {
-      train <- btw_candidates_1983_2025 %>%
-        filter((election != this_election), partei != "AND")
-      test <- dplyr::filter(btw_candidates_1983_2025, election == this_election)
-      model_formula <- as.formula(formula)
-      reg <- lm(model_formula, data = train)
-      test$predicted <- predict(reg, newdata = test)
-      test <- test %>% group_by(wkr) %>% mutate(winner_pred = ifelse(predicted == max(predicted, na.rm = TRUE), 1, 0))
-      eval_results_leads <- rbind(
-        eval_results_leads,
-        data.frame(
-          formula = formula,
-          name = formulas$name[formulas$formula == formula],
-          lead_type = lead_type,
-          election = this_election,
-          correct_predictions = sum(test$winner == test$winner_pred, na.rm = TRUE),
-          total_predictions = nrow(test),
-          accuracy = sum(test$winner == test$winner_pred, na.rm = TRUE) / nrow(test),
-          winner_accuracy = sum(test$winner[test$winner == 1] == test$winner_pred[test$winner == 1], na.rm = TRUE) / sum(test$winner == 1, na.rm = TRUE)
+# 3. Apply coloring per column
+for (col in metric_cols) {
+  if (col == "Winner accuracy") {
+    # Higher = better
+    gt_table <- gt_table %>%
+      data_color(
+        columns = all_of(col),
+        colors = col_numeric(
+          palette = c("#d73027", "#fdb863", "#1a9850"),  # red → yellow → green
+          domain = range(heatmap_data_clean[[col]], na.rm = TRUE)
         )
       )
-    }
+  } else {
+    # Lower = better (MAE, RMSE, Out-of-bounds)
+    gt_table <- gt_table %>%
+      data_color(
+        columns = all_of(col),
+        colors = col_numeric(
+          palette = c("#1a9850", "#fdb863", "#d73027"),  # green → yellow → red
+          domain = range(heatmap_data_clean[[col]], na.rm = TRUE)
+        )
+      )
   }
 }
 
-# ========== Aggregate and Save Lead-Type Results ==========
-agg_leads <- eval_results_leads %>%
-  group_by(name, formula, lead_type) %>%
-  summarise(
-    avg_accuracy = mean(accuracy, na.rm = TRUE),
-    avg_winner_accuracy = mean(winner_accuracy, na.rm = TRUE),
-    avg_correct_predictions = mean(correct_predictions, na.rm = TRUE),
-    avg_total_predictions = mean(total_predictions, na.rm = TRUE)
-  ) %>%
-  arrange(lead_type, desc(avg_winner_accuracy))
+# 5. Save as PNG
+gtsave(gt_table, "figures/comprehensive_performance_heatmap.png")
+cat("GT heatmap table saved as PNG!\n")
 
-write.csv(eval_results_leads, "data/out/eval_results_leads.csv", row.names = FALSE)
-write.csv(agg_leads, "data/out/eval_aggregate_leads.csv", row.names = FALSE)
 
 
